@@ -8,3 +8,17 @@ coverage/
 .env.*.local
 .DS_Store
 *.tsbuildinfo
+
+# next.js
+.next/
+next-env.d.ts
+
+# playwright
+test-results/
+playwright-report/
+
+# supabase
+supabase/.branches
+supabase/.temp
+supabase/functions/.env
+supabase/functions/.env.production

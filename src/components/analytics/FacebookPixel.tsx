@@ -49,6 +49,7 @@ export function FacebookPixel({ pixelId }: FacebookPixelProps) {
         }}
       />
       <noscript>
+        {/* eslint-disable-next-line @next/next/no-img-element -- Meta's documented noscript tracking pixel; next/image doesn't apply to external 1x1 pixels */}
         <img
           height="1"
           width="1"
