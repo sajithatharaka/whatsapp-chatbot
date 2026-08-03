@@ -1,0 +1,62 @@
+#!/bin/sh
+
+# ── 1. Format & lint staged files ───────────────────────────────────────────
+echo "Running lint-staged (format + lint)..."
+npx lint-staged
+LINT_EXIT=$?
+if [ $LINT_EXIT -ne 0 ]; then
+  echo ""
+  echo "Commit blocked: formatting or linting failed."
+  exit 1
+fi
+
+# ── 2. Playwright e2e tests ──────────────────────────────────────────────────
+if [ -d "tests/e2e" ] && [ "$(ls -A tests/e2e 2>/dev/null)" ]; then
+  echo ""
+  echo "Running Playwright e2e tests..."
+  npx playwright test
+  E2E_EXIT=$?
+  if [ $E2E_EXIT -ne 0 ]; then
+    echo ""
+    echo "Commit blocked: Playwright e2e tests failed."
+    exit 1
+  fi
+  echo "Playwright tests passed."
+else
+  echo ""
+  echo "No Playwright tests found in tests/e2e — skipping."
+fi
+
+# ── 3. Vitest unit/integration tests with coverage ──────────────────────────
+echo ""
+echo "Running tests with coverage..."
+echo "Required: statements ≥85%  |  lines ≥85%  |  branches ≥75%  |  functions ≥75%"
+echo ""
+
+npm run test:coverage
+COVERAGE_EXIT=$?
+
+SUMMARY="coverage/coverage-summary.json"
+
+if [ -f "$SUMMARY" ]; then
+  STMT=$(node -e "const d=require('./$SUMMARY'); process.stdout.write(String(d.total.statements.pct))")
+  LINE=$(node -e "const d=require('./$SUMMARY'); process.stdout.write(String(d.total.lines.pct))")
+  BRANCH=$(node -e "const d=require('./$SUMMARY'); process.stdout.write(String(d.total.branches.pct))")
+  FUNC=$(node -e "const d=require('./$SUMMARY'); process.stdout.write(String(d.total.functions.pct))")
+  echo ""
+  echo "Coverage summary:"
+  printf "  Statements : %s%%  (required ≥85%%)\n" "$STMT"
+  printf "  Lines      : %s%%  (required ≥85%%)\n" "$LINE"
+  printf "  Branches   : %s%%  (required ≥75%%)\n" "$BRANCH"
+  printf "  Functions  : %s%%  (required ≥75%%)\n" "$FUNC"
+fi
+
+if [ $COVERAGE_EXIT -ne 0 ]; then
+  echo ""
+  echo "Commit blocked: tests failed or coverage thresholds not met."
+  echo "Open coverage/index.html for the full report."
+  exit 1
+fi
+
+echo ""
+echo "All checks passed — proceeding with commit."

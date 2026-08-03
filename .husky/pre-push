@@ -1,0 +1,18 @@
+#!/bin/sh
+
+protected_branch='main'
+
+while read -r local_ref local_sha remote_ref remote_sha
+do
+  if [ "$remote_ref" = "refs/heads/$protected_branch" ]; then
+    echo ""
+    echo "Direct push to '$protected_branch' is blocked."
+    echo "Create a feature branch and open a pull request instead:"
+    echo "  git checkout -b feature/your-change"
+    echo "  git push -u origin feature/your-change"
+    echo ""
+    exit 1
+  fi
+done
+
+exit 0
