@@ -43,11 +43,13 @@ Applied in order via `npm run db:push`:
 - `_shared/` — shared helpers (Supabase service client, admin-secret auth, Cloudflare Workers AI
   provider, chunking/checksum, prompt building, memory/summary, vector search, shared types).
 
-`_shared/ai-provider.ts` calls Cloudflare's Workers AI v1 (OpenAI-compatible) API directly —
+`_shared/ai-provider.ts` calls Cloudflare's Workers AI v1 (OpenAI-compatible) API —
 `https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/ai/v1/{chat/completions|embeddings}`
-— using `Authorization: Bearer {CF_API_TOKEN}`. This is not routed through AI Gateway, so there's
-no gateway-side request logging/caching/rate-limiting. `config.chat_model` / `config.embedding_model`
-/ `config.fallback_model` (from `ai_configuration`) are passed straight through as the `model`
+— using `Authorization: Bearer {CF_API_TOKEN}`. When `CF_AI_GATEWAY_ID` is set, requests also carry
+a `cf-aig-gateway-id` header, routing them through that Cloudflare AI Gateway for gateway-side
+caching/rate-limiting/logging (see Change history); left unset, requests go straight to
+`api.cloudflare.com` with none of that. `config.chat_model` / `config.embedding_model` /
+`config.fallback_model` (from `ai_configuration`) are passed straight through as the `model`
 field; both native Workers AI ids (`@cf/...`) and the broader aggregated catalog (e.g.
 `openai/gpt-5-nano`) are accepted.
 
@@ -57,12 +59,13 @@ function). `ingest`, `reindex`, and the delete path on `knowledge` additionally 
 
 ## Environment variables
 
-| Variable                                                         | Where                                  | Purpose                                            |
-| ---------------------------------------------------------------- | -------------------------------------- | -------------------------------------------------- |
-| `SUPABASE_ACCESS_TOKEN`, `SUPABASE_PROJECT_ID`                   | root `.env.local`                      | CLI auth for `db:push` / `supabase:*` scripts only |
-| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY` | injected by Supabase CLI/runtime       | Never set manually                                 |
-| `CF_ACCOUNT_ID`, `CF_API_TOKEN`                                  | `supabase/functions/.env(.production)` | Workers AI v1 API access for chat/embeddings       |
-| `INGEST_ADMIN_SECRET`                                            | `supabase/functions/.env(.production)` | Shared secret required on admin-mutating requests  |
+| Variable                                                         | Where                                  | Purpose                                                 |
+| ---------------------------------------------------------------- | -------------------------------------- | ------------------------------------------------------- |
+| `SUPABASE_ACCESS_TOKEN`, `SUPABASE_PROJECT_ID`                   | root `.env.local`                      | CLI auth for `db:push` / `supabase:*` scripts only      |
+| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY` | injected by Supabase CLI/runtime       | Never set manually                                      |
+| `CF_ACCOUNT_ID`, `CF_API_TOKEN`                                  | `supabase/functions/.env(.production)` | Workers AI v1 API access for chat/embeddings            |
+| `CF_AI_GATEWAY_ID`                                               | `supabase/functions/.env(.production)` | Optional: routes Workers AI calls through an AI Gateway |
+| `INGEST_ADMIN_SECRET`                                            | `supabase/functions/.env(.production)` | Shared secret required on admin-mutating requests       |
 
 `supabase/functions/.env.example` is the template for the function-local file; it is not
 committed with real values (see `.gitignore`).
@@ -140,6 +143,27 @@ committed with real values (see `.gitignore`).
   (`@cf/baai/bge-base-en-v1.5`) was unaffected and confirmed still current — left unchanged, since
   changing it would require re-embedding every existing `knowledge_chunks` row. No application
   code change was needed or made; this is a data-only migration.
+- **2026-08-04 — Workers AI 429s (`code 971`) persisted under real traffic; re-added AI Gateway
+  coverage.** The `fetchWithRetry()` fix above clears an isolated blip but not sustained
+  throttling: `chat` embeds+completes on every inbound message, and `ingest`/`reindex` batch-embed
+  on the same shared account-level quota, so a burst of either still exhausts the two-retry budget
+  and surfaces as a 500. Root cause traced back to the AI Gateway removal earlier the same day
+  (previous entry), which explicitly traded away gateway-side caching/rate-limiting for simplicity.
+  Reinstated, but not by reverting to the old `gateway.ai.cloudflare.com/v1/{account}/{gateway}/workers-ai/{model}`
+  URL/native-shape setup — Cloudflare's REST API now supports attaching full Gateway behavior
+  (caching, rate-limit queuing, logging) to the same `api.cloudflare.com/.../ai/v1/*`
+  OpenAI-compatible endpoint already in use, via a `cf-aig-gateway-id` request header, with no URL
+  or request/response shape change. `authHeaders()` in `_shared/ai-provider.ts` now adds that
+  header when the new `CF_AI_GATEWAY_ID` env var is set; unset, behavior is unchanged, so this is
+  an opt-in rollout gated on creating a Gateway in the Cloudflare dashboard and setting the secret
+  — no code path breaks if it's left unconfigured. Postgres-backed embedding caching and isolating
+  `ingest`/`reindex` bulk traffic onto a separate rate budget from live `chat` traffic were
+  considered and deliberately deferred; the Gateway's own caching/queuing covers the immediate
+  production issue. Covered by the `cf-aig-gateway-id` header-present/absent cases in
+  `supabase/functions/_shared/ai-provider.test.ts`. Note: Cloudflare's own docs were unreachable
+  from the environment this fix was written in (network policy blocked `developers.cloudflare.com`),
+  so the header name/behavior was corroborated via search rather than a direct docs read — worth a
+  quick cross-check against current Cloudflare AI Gateway docs if this doesn't clear the 429s.
 
 ## Acceptance Criteria
 
