@@ -13,13 +13,22 @@ function apiUrl(path: string): string {
   return `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/v1/${path}`;
 }
 
+// Setting CF_AI_GATEWAY_ID routes these same api.cloudflare.com/ai/v1/*
+// requests through a Cloudflare AI Gateway via the cf-aig-gateway-id header
+// (Cloudflare's REST-API-level Gateway integration) — no URL or request
+// shape change, but the account's Workers AI rate limit (429, code 971) is
+// then absorbed by the gateway's own caching/rate-limit queuing instead of
+// hitting the account limit directly. Left unset, behavior is unchanged.
 function authHeaders(): HeadersInit {
   const token = Deno.env.get('CF_API_TOKEN');
   if (!token) throw new Error('CF_API_TOKEN is not set');
-  return {
+  const headers: Record<string, string> = {
     Authorization: `Bearer ${token}`,
     'Content-Type': 'application/json',
   };
+  const gatewayId = Deno.env.get('CF_AI_GATEWAY_ID');
+  if (gatewayId) headers['cf-aig-gateway-id'] = gatewayId;
+  return headers;
 }
 
 function sleep(ms: number): Promise<void> {

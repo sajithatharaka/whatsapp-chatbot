@@ -216,6 +216,78 @@ Deno.test('chatComplete throws when CF_API_TOKEN is not set', async () => {
 });
 
 Deno.test(
+  'chatComplete sends a cf-aig-gateway-id header when CF_AI_GATEWAY_ID is set',
+  async () => {
+    await withEnv(
+      { CF_ACCOUNT_ID: 'acct-1', CF_API_TOKEN: 'token-1', CF_AI_GATEWAY_ID: 'gw-1' },
+      async () => {
+        let capturedHeaders: Record<string, string> = {};
+        const restore = stubFetch(async (_input, init) => {
+          capturedHeaders = init?.headers as Record<string, string>;
+          return new Response(JSON.stringify({ choices: [{ message: { content: 'hi' } }] }), {
+            status: 200,
+          });
+        });
+        try {
+          await chatComplete([{ role: 'user', content: 'hi' }], {
+            model: 'openai/gpt-5-nano',
+            temperature: 0,
+            maxTokens: 10,
+          });
+          assertEquals(capturedHeaders['cf-aig-gateway-id'], 'gw-1');
+        } finally {
+          restore();
+        }
+      }
+    );
+  }
+);
+
+Deno.test(
+  'chatComplete omits the cf-aig-gateway-id header when CF_AI_GATEWAY_ID is not set',
+  async () => {
+    await withEnv({ CF_ACCOUNT_ID: 'acct-1', CF_API_TOKEN: 'token-1' }, async () => {
+      let capturedHeaders: Record<string, string> = {};
+      const restore = stubFetch(async (_input, init) => {
+        capturedHeaders = init?.headers as Record<string, string>;
+        return new Response(JSON.stringify({ choices: [{ message: { content: 'hi' } }] }), {
+          status: 200,
+        });
+      });
+      try {
+        await chatComplete([{ role: 'user', content: 'hi' }], {
+          model: 'openai/gpt-5-nano',
+          temperature: 0,
+          maxTokens: 10,
+        });
+        assertEquals('cf-aig-gateway-id' in capturedHeaders, false);
+      } finally {
+        restore();
+      }
+    });
+  }
+);
+
+Deno.test('embedBatch sends a cf-aig-gateway-id header when CF_AI_GATEWAY_ID is set', async () => {
+  await withEnv(
+    { CF_ACCOUNT_ID: 'acct-1', CF_API_TOKEN: 'token-1', CF_AI_GATEWAY_ID: 'gw-1' },
+    async () => {
+      let capturedHeaders: Record<string, string> = {};
+      const restore = stubFetch(async (_input, init) => {
+        capturedHeaders = init?.headers as Record<string, string>;
+        return new Response(JSON.stringify({ data: [{ embedding: [1, 2] }] }), { status: 200 });
+      });
+      try {
+        await embedBatch(['a'], '@cf/baai/bge-base-en-v1.5');
+        assertEquals(capturedHeaders['cf-aig-gateway-id'], 'gw-1');
+      } finally {
+        restore();
+      }
+    }
+  );
+});
+
+Deno.test(
   'embedBatch posts to the embeddings endpoint and returns each item embedding in order',
   async () => {
     await withEnv({ CF_ACCOUNT_ID: 'acct-1', CF_API_TOKEN: 'token-1' }, async () => {
