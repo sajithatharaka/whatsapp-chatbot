@@ -1,0 +1,49 @@
+project_id = "whatsapp-chatbot"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "extensions"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+major_version = 15
+
+[studio]
+enabled = true
+port = 54323
+
+[inbucket]
+enabled = false
+
+[storage]
+enabled = false
+
+[auth]
+enabled = false
+
+[functions.chat]
+enabled = true
+verify_jwt = true
+
+[functions.ingest]
+enabled = true
+verify_jwt = true
+
+[functions.search]
+enabled = true
+verify_jwt = true
+
+[functions.reindex]
+enabled = true
+verify_jwt = true
+
+[functions.knowledge]
+enabled = true
+verify_jwt = true
+
+[functions.health]
+enabled = true
+verify_jwt = false
