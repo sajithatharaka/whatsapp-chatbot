@@ -40,8 +40,16 @@ Applied in order via `npm run db:push`:
 - `reindex` — admin-only: re-chunk/re-embed existing documents.
 - `knowledge` — admin CRUD over knowledge documents (delete is admin-only).
 - `health` — unauthenticated liveness check.
-- `_shared/` — shared helpers (Supabase service client, admin-secret auth, Cloudflare AI
+- `_shared/` — shared helpers (Supabase service client, admin-secret auth, Cloudflare Workers AI
   provider, chunking/checksum, prompt building, memory/summary, vector search, shared types).
+
+`_shared/ai-provider.ts` calls Cloudflare's Workers AI v1 (OpenAI-compatible) API directly —
+`https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/ai/v1/{chat/completions|embeddings}`
+— using `Authorization: Bearer {CF_API_TOKEN}`. This is not routed through AI Gateway, so there's
+no gateway-side request logging/caching/rate-limiting. `config.chat_model` / `config.embedding_model`
+/ `config.fallback_model` (from `ai_configuration`) are passed straight through as the `model`
+field; both native Workers AI ids (`@cf/...`) and the broader aggregated catalog (e.g.
+`openai/gpt-5-nano`) are accepted.
 
 Function-level auth/enable state is declared in `supabase/config.toml` (`verify_jwt` per
 function). `ingest`, `reindex`, and the delete path on `knowledge` additionally require the
@@ -49,12 +57,12 @@ function). `ingest`, `reindex`, and the delete path on `knowledge` additionally 
 
 ## Environment variables
 
-| Variable                                                                                                          | Where                                  | Purpose                                            |
-| ----------------------------------------------------------------------------------------------------------------- | -------------------------------------- | -------------------------------------------------- |
-| `SUPABASE_ACCESS_TOKEN`, `SUPABASE_PROJECT_ID`                                                                    | root `.env.local`                      | CLI auth for `db:push` / `supabase:*` scripts only |
-| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY`                                                  | injected by Supabase CLI/runtime       | Never set manually                                 |
-| `CF_ACCOUNT_ID`, `CF_AI_GATEWAY_ID`, `CF_AI_GATEWAY_TOKEN`, `CF_CHAT_MODEL_DEFAULT`, `CF_EMBEDDING_MODEL_DEFAULT` | `supabase/functions/.env(.production)` | Cloudflare AI Gateway access for chat/embeddings   |
-| `INGEST_ADMIN_SECRET`                                                                                             | `supabase/functions/.env(.production)` | Shared secret required on admin-mutating requests  |
+| Variable                                                         | Where                                  | Purpose                                            |
+| ---------------------------------------------------------------- | -------------------------------------- | -------------------------------------------------- |
+| `SUPABASE_ACCESS_TOKEN`, `SUPABASE_PROJECT_ID`                   | root `.env.local`                      | CLI auth for `db:push` / `supabase:*` scripts only |
+| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY` | injected by Supabase CLI/runtime       | Never set manually                                 |
+| `CF_ACCOUNT_ID`, `CF_API_TOKEN`                                  | `supabase/functions/.env(.production)` | Workers AI v1 API access for chat/embeddings       |
+| `INGEST_ADMIN_SECRET`                                            | `supabase/functions/.env(.production)` | Shared secret required on admin-mutating requests  |
 
 `supabase/functions/.env.example` is the template for the function-local file; it is not
 committed with real values (see `.gitignore`).
@@ -91,6 +99,47 @@ committed with real values (see `.gitignore`).
   `documentHasChunks()` (`supabase/functions/_shared/knowledge.ts`) before taking the `unchanged`
   path; covered by `supabase/functions/_shared/knowledge.test.ts` (Deno test runner — not wired
   into `npm test`, which only covers the Next.js/Vitest side of this repo).
+- **2026-08-04 — switched `_shared/ai-provider.ts` from AI Gateway to Workers AI v1 directly.**
+  Chat/embedding calls previously went through `gateway.ai.cloudflare.com/v1/{account}/{gateway}/workers-ai/{model}`
+  using Workers AI's native request/response shape (`{text: [...]}` / `{result: {response}}`).
+  Rewritten to call `api.cloudflare.com/client/v4/accounts/{account}/ai/v1/{chat/completions|embeddings}`
+  directly, OpenAI-compatible request/response shape (`{model, messages}` → `choices[0].message.content`;
+  `{model, input}` → `data[].embedding`). Drops the `CF_AI_GATEWAY_ID` env var (no longer needed —
+  no gateway in the path) and renames `CF_AI_GATEWAY_TOKEN` to `CF_API_TOKEN` (a plain Cloudflare
+  API token with `Account > Workers AI > Read`, not a gateway-specific credential). Also removed
+  the unused `CF_CHAT_MODEL_DEFAULT` / `CF_EMBEDDING_MODEL_DEFAULT` vars from
+  `supabase/functions/.env.example` — dead even before this change, since model selection has
+  always come from `ai_configuration.chat_model` / `embedding_model` / `fallback_model`, not env
+  vars. Existing `@cf/...` model ids in that table still work against the new endpoint unchanged;
+  the new endpoint additionally accepts the wider aggregated catalog (e.g. `openai/gpt-5-nano`).
+  Trade-off: losing AI Gateway's request logging/caching/rate-limiting, accepted for simplicity.
+  Covered by `supabase/functions/_shared/ai-provider.test.ts`.
+- **2026-08-04 — Workers AI 429s (`code 971`, account rate limit) surfaced as `chat` 500s.**
+  Observed in production logs immediately after the change above: a burst of requests tripped
+  Cloudflare's account-level Workers AI rate limit, and the resulting 429 propagated straight up
+  as an uncaught error, returning `Internal error` to the WhatsApp user for what's normally a
+  transient condition. Fixed by adding `fetchWithRetry()` in `_shared/ai-provider.ts` — retries a
+  429 up to twice with backoff (honoring `Retry-After` when Cloudflare sends one, else 500ms then
+  1500ms) before giving up; applies to both `chatComplete()` and `embedBatch()`. Covered by the
+  retry-succeeds / retries-exhausted / `Retry-After`-honored cases in
+  `supabase/functions/_shared/ai-provider.test.ts`.
+- **2026-08-04 — `chat` 500s: deprecated Workers AI models.** `ai_configuration.chat_model`
+  (`@cf/meta/llama-3.1-8b-instruct`) was deprecated by Cloudflare on 2026-05-30 and started
+  returning `410 { errors: [{ code: 5028, message: "Model has been deprecated" }] }` from the
+  Workers AI v1 API. Initially misdiagnosed as the 429/rate-limit issue above because the API
+  gateway log alone doesn't surface the underlying error — the function's own execution log
+  (`console.error('chat function error:', error)`) had the real `410`. `chat/index.ts`'s
+  primary/fallback logic only retries once with `config.fallback_model`, which was
+  `@cf/meta/llama-3-8b-instruct` — an older, also-deprecated model — so every request failed
+  end-to-end regardless. Not a code bug: the ai-provider retry/fallback logic worked as designed,
+  the configured model ids were just stale. Fixed by
+  `20260804010000_update_deprecated_chat_models.sql`, which updates the active `ai_configuration`
+  row to `chat_model = @cf/meta/llama-3.1-8b-instruct-fast` and
+  `fallback_model = @cf/meta/llama-3.2-3b-instruct` (both confirmed current on
+  https://developers.cloudflare.com/workers-ai/models/ as of this fix). `embedding_model`
+  (`@cf/baai/bge-base-en-v1.5`) was unaffected and confirmed still current — left unchanged, since
+  changing it would require re-embedding every existing `knowledge_chunks` row. No application
+  code change was needed or made; this is a data-only migration.
 
 ## Acceptance Criteria
 

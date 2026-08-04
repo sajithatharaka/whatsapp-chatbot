@@ -1,23 +1,51 @@
 import type { PromptMessage } from './types.ts';
 
-// The only file in this codebase that knows Cloudflare AI Gateway's URL
-// shape. Swapping AI providers later means changing only this file.
-function gatewayUrl(model: string): string {
+// The only file in this codebase that knows Cloudflare's Workers AI v1
+// (OpenAI-compatible) API shape. Swapping AI providers later means changing
+// only this file. Calls api.cloudflare.com directly — not routed through AI
+// Gateway, so there's no request logging/caching/rate-limiting from that
+// layer here.
+function apiUrl(path: string): string {
   const accountId = Deno.env.get('CF_ACCOUNT_ID');
-  const gatewayId = Deno.env.get('CF_AI_GATEWAY_ID');
-  if (!accountId || !gatewayId) {
-    throw new Error('CF_ACCOUNT_ID / CF_AI_GATEWAY_ID are not set');
+  if (!accountId) {
+    throw new Error('CF_ACCOUNT_ID is not set');
   }
-  return `https://gateway.ai.cloudflare.com/v1/${accountId}/${gatewayId}/workers-ai/${model}`;
+  return `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/v1/${path}`;
 }
 
 function authHeaders(): HeadersInit {
-  const token = Deno.env.get('CF_AI_GATEWAY_TOKEN');
-  if (!token) throw new Error('CF_AI_GATEWAY_TOKEN is not set');
+  const token = Deno.env.get('CF_API_TOKEN');
+  if (!token) throw new Error('CF_API_TOKEN is not set');
   return {
     Authorization: `Bearer ${token}`,
     'Content-Type': 'application/json',
   };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Cloudflare's account-level Workers AI rate limit (429, error code 971) is
+// transient — a couple of short retries clears it without surfacing
+// "Internal error" to the WhatsApp user for what's usually a burst of
+// concurrent messages.
+const RATE_LIMIT_RETRY_DELAYS_MS = [500, 1500];
+
+async function fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
+  let res = await fetch(url, init);
+  for (const fallbackDelayMs of RATE_LIMIT_RETRY_DELAYS_MS) {
+    if (res.status !== 429) return res;
+    const retryAfterHeader = res.headers.get('Retry-After');
+    const retryAfterSeconds = retryAfterHeader === null ? NaN : Number(retryAfterHeader);
+    const delayMs =
+      Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0
+        ? retryAfterSeconds * 1000
+        : fallbackDelayMs;
+    await sleep(delayMs);
+    res = await fetch(url, init);
+  }
+  return res;
 }
 
 export async function embed(text: string, model: string): Promise<number[]> {
@@ -25,14 +53,15 @@ export async function embed(text: string, model: string): Promise<number[]> {
   return vector;
 }
 
-// Workers AI embedding models accept multiple texts in one request — used by
-// /ingest and /reindex to embed a whole document's chunks in a handful of
-// network round trips instead of one per chunk.
+// Workers AI's OpenAI-compatible embeddings endpoint accepts a batch of
+// inputs in one request — used by /ingest and /reindex to embed a whole
+// document's chunks in a handful of network round trips instead of one per
+// chunk.
 export async function embedBatch(texts: string[], model: string): Promise<number[][]> {
-  const res = await fetch(gatewayUrl(model), {
+  const res = await fetchWithRetry(apiUrl('embeddings'), {
     method: 'POST',
     headers: authHeaders(),
-    body: JSON.stringify({ text: texts }),
+    body: JSON.stringify({ model, input: texts }),
   });
 
   if (!res.ok) {
@@ -40,11 +69,11 @@ export async function embedBatch(texts: string[], model: string): Promise<number
   }
 
   const body = await res.json();
-  const vectors = body?.result?.data;
-  if (!Array.isArray(vectors)) {
-    throw new Error('Embedding response missing result.data');
+  const items = body?.data;
+  if (!Array.isArray(items)) {
+    throw new Error('Embedding response missing data');
   }
-  return vectors as number[][];
+  return items.map((item) => item?.embedding) as number[][];
 }
 
 export interface ChatCompleteOptions {
@@ -57,10 +86,11 @@ export async function chatComplete(
   messages: PromptMessage[],
   opts: ChatCompleteOptions
 ): Promise<string> {
-  const res = await fetch(gatewayUrl(opts.model), {
+  const res = await fetchWithRetry(apiUrl('chat/completions'), {
     method: 'POST',
     headers: authHeaders(),
     body: JSON.stringify({
+      model: opts.model,
       messages,
       temperature: opts.temperature,
       max_tokens: opts.maxTokens,
@@ -72,9 +102,9 @@ export async function chatComplete(
   }
 
   const body = await res.json();
-  const reply = body?.result?.response;
+  const reply = body?.choices?.[0]?.message?.content;
   if (typeof reply !== 'string') {
-    throw new Error('Chat completion response missing result.response');
+    throw new Error('Chat completion response missing choices[0].message.content');
   }
   return reply;
 }

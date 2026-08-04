@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
@@ -25,7 +25,11 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { mapFormToIngestPayload } from '@/lib/knowledge/mapFormToIngestPayload';
-import type { KnowledgeFormValues, KnowledgeSourceType } from '@/lib/knowledge/types';
+import type {
+  KnowledgeFormValues,
+  KnowledgeSourceType,
+  ViewableChunk,
+} from '@/lib/knowledge/types';
 
 const SOURCE_TYPE_OPTIONS: { value: KnowledgeSourceType; label: string }[] = [
   { value: 'text', label: 'Plain text' },
@@ -76,6 +80,39 @@ export function KnowledgeFormDialog({ mode, trigger, initialValues }: KnowledgeF
     contentBase64: '',
   });
   const [fileName, setFileName] = useState<string | null>(null);
+  const [previousContent, setPreviousContent] = useState('');
+  const [previousContentStatus, setPreviousContentStatus] = useState<
+    'idle' | 'loading' | 'loaded' | 'error'
+  >('idle');
+
+  // Only chunked/derived text is stored (see KnowledgeChunksView), so this is
+  // the closest reconstruction of "what's currently ingested" — not
+  // guaranteed to match the original raw content for pdf/docx/website
+  // sources, which get transformed during chunking.
+  useEffect(() => {
+    if (!open || mode !== 'edit' || !values.documentId) return;
+
+    let cancelled = false;
+    setPreviousContentStatus('loading');
+
+    fetch(`/api/knowledge/${values.documentId}`)
+      .then((response) => {
+        if (!response.ok) throw new Error('Failed to load previous content');
+        return response.json();
+      })
+      .then((body: { chunks: ViewableChunk[] }) => {
+        if (cancelled) return;
+        setPreviousContent(body.chunks.map((chunk) => chunk.chunk_text).join('\n\n'));
+        setPreviousContentStatus('loaded');
+      })
+      .catch(() => {
+        if (!cancelled) setPreviousContentStatus('error');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, mode, values.documentId]);
 
   async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -120,9 +157,29 @@ export function KnowledgeFormDialog({ mode, trigger, initialValues }: KnowledgeF
             <DialogDescription>
               {mode === 'create'
                 ? 'Add a new document to the assistant’s knowledge base.'
-                : 'Provide the updated content — this replaces the current version. The previously ingested content isn’t editable in place, only re-ingested.'}
+                : 'Review the previously ingested content below, then provide the updated content — saving replaces the current version.'}
             </DialogDescription>
           </DialogHeader>
+
+          {mode === 'edit' ? (
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="knowledge-form-previous-content">Previous content</Label>
+              {previousContentStatus === 'loading' ? (
+                <p className="text-xs text-muted-foreground">Loading previous content…</p>
+              ) : previousContentStatus === 'error' ? (
+                <p className="text-xs text-destructive">Couldn’t load the previous content.</p>
+              ) : (
+                <Textarea
+                  id="knowledge-form-previous-content"
+                  data-testid="knowledge-form-previous-content-textarea"
+                  readOnly
+                  rows={6}
+                  className="bg-muted"
+                  value={previousContent || 'No previous content ingested yet.'}
+                />
+              )}
+            </div>
+          ) : null}
 
           <div className="flex flex-col gap-2">
             <Label htmlFor="knowledge-form-title">Title</Label>

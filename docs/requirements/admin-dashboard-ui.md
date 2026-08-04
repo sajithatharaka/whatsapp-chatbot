@@ -45,7 +45,8 @@ Wired directly to the real Edge Function contracts (`supabase/functions/knowledg
   Reads (list/detail) are called in-process from Server Components; writes go through:
   - `src/app/api/knowledge/route.ts` — `POST` (create **and** update — passing an existing
     `documentId` re-ingests it; the underlying contract has no separate PATCH).
-  - `src/app/api/knowledge/[id]/route.ts` — `DELETE`.
+  - `src/app/api/knowledge/[id]/route.ts` — `DELETE`, and `GET` (returns `{ document, chunks }`;
+    added so the edit dialog can fetch previous content client-side).
 - `src/lib/knowledge/mapFormToIngestPayload.ts` — pure function mapping form values to the
   `/ingest` body, including only the field(s) relevant to the selected `sourceType`
   (`text|markdown|csv` → `content`, `website` → `source`, `pdf|docx` → `contentBase64`).
@@ -55,6 +56,15 @@ KnowledgeChunksView,KnowledgeRowActions,KnowledgeDetailDeleteAction}.tsx` +
 - **"Update" re-ingests, it doesn't edit in place**: only chunked/derived text is stored, not the
   original raw content, so the edit dialog prefills title/source/sourceType but requires fresh
   content — the dialog copy says this explicitly.
+- **Edit dialog shows the previously ingested content (2026-08-04)**: opening
+  `KnowledgeFormDialog` in `mode="edit"` fetches `GET /api/knowledge/[id]` (new route handler,
+  wraps `getKnowledgeDocument`) and renders the document's existing chunks — joined with `\n\n`
+  in `chunk_index` order — in a read-only "Previous content" textarea above the editable fields,
+  so the reviewer isn't retyping/pasting blind. This is a reconstruction of the _chunked_ text,
+  not guaranteed to match the original raw source for `pdf`/`docx`/`website` types (chunking
+  transforms it); the textarea shows "No previous content ingested yet." if there are no chunks,
+  or an inline error if the fetch fails. No history/versioning table was added — there is still
+  only ever "current chunks" to show, not a diff against a prior edit.
 - `reindex` is **not** wired into this UI (not requested; the Edge Function exists for future use).
 
 ### API documentation

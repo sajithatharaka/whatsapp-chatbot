@@ -34,6 +34,10 @@ describe('KnowledgeFormDialog', () => {
   });
 
   it('shows the source URL input (not the content textarea) when editing a website document', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ chunks: [] }) })
+    );
     const user = userEvent.setup();
     render(
       <KnowledgeFormDialog
@@ -55,6 +59,10 @@ describe('KnowledgeFormDialog', () => {
   });
 
   it('shows the file input (not the content textarea) when editing a pdf document', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ chunks: [] }) })
+    );
     const user = userEvent.setup();
     render(
       <KnowledgeFormDialog
@@ -68,6 +76,66 @@ describe('KnowledgeFormDialog', () => {
 
     expect(screen.getByTestId('knowledge-form-file-input')).toBeInTheDocument();
     expect(screen.queryByTestId('knowledge-form-content-textarea')).not.toBeInTheDocument();
+  });
+
+  it('fetches and displays the previously ingested content when opening the edit dialog', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        document: { id: 'doc_1' },
+        chunks: [
+          {
+            id: 'chunk_1',
+            chunk_text: 'First chunk.',
+            metadata: {},
+            created_at: '2026-08-01T00:00:00Z',
+          },
+          {
+            id: 'chunk_2',
+            chunk_text: 'Second chunk.',
+            metadata: {},
+            created_at: '2026-08-01T00:00:01Z',
+          },
+        ],
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const user = userEvent.setup();
+    render(
+      <KnowledgeFormDialog
+        mode="edit"
+        trigger={<button>Edit</button>}
+        initialValues={{ documentId: 'doc_1', title: 'FAQ', sourceType: 'text', source: '' }}
+      />
+    );
+
+    await user.click(screen.getByText('Edit'));
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/knowledge/doc_1');
+    await waitFor(() =>
+      expect(screen.getByTestId('knowledge-form-previous-content-textarea')).toHaveValue(
+        'First chunk.\n\nSecond chunk.'
+      )
+    );
+    expect(screen.getByTestId('knowledge-form-previous-content-textarea')).toHaveAttribute(
+      'readonly'
+    );
+  });
+
+  it('does not fetch or show previous content when creating a document', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const user = userEvent.setup();
+    render(<KnowledgeFormDialog mode="create" trigger={<button>Add document</button>} />);
+
+    await user.click(screen.getByText('Add document'));
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(
+      screen.queryByTestId('knowledge-form-previous-content-textarea')
+    ).not.toBeInTheDocument();
   });
 
   it('submits the mapped payload to /api/knowledge', async () => {
