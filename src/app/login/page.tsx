@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import Script from 'next/script';
 
 import { LoginForm } from '@/components/auth/LoginForm';
 import { createClient } from '@/lib/supabase/server';
@@ -19,6 +20,7 @@ export default async function LoginPage() {
         <h1 className="mb-6 text-lg font-semibold">Sign in</h1>
         <LoginForm />
       </div>
+      <Script src="https://manychat-wa-agent.netlify.app/widget.js" strategy="afterInteractive" />
     </div>
   );
 }

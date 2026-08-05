@@ -64,6 +64,12 @@ embed snippet needs zero configuration:
 <script src="https://<your-app-domain>/widget.js" async></script>
 ```
 
+For example, this deployment's own login page embeds itself as a live demo:
+
+```html
+<script src="https://manychat-wa-agent.netlify.app/widget.js" async></script>
+```
+
 The Supabase URL and anon key are interpolated server-side from `NEXT_PUBLIC_SUPABASE_URL` /
 `NEXT_PUBLIC_SUPABASE_ANON_KEY` (the same public, client-safe values already used by
 `src/lib/supabase/client.ts`) at request time. The script itself is dependency-free vanilla JS: it
