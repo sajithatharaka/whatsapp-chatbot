@@ -1,11 +1,20 @@
 import 'server-only';
 
 import type {
+  ChatEscalationRecord,
+  ConversationMessageRecord,
+  EscalationListItem,
+  KnowledgeSearchMatch,
+  ListEscalationsParams,
+  UpdateEscalationPayload,
+} from '@/lib/escalations/types';
+import type {
   IngestRequestBody,
   IngestResponse,
   KnowledgeDocumentRecord,
   ViewableChunk,
 } from '@/lib/knowledge/types';
+import type { UpdateWidgetConfigPayload, WidgetConfig } from '@/lib/widget/types';
 
 export class EdgeFunctionError extends Error {
   constructor(
@@ -87,4 +96,79 @@ export async function ingestKnowledgeDocument(payload: IngestRequestBody): Promi
     body: JSON.stringify(payload),
   });
   return parseOrThrow(response);
+}
+
+export async function searchKnowledgeMatches(query: string): Promise<KnowledgeSearchMatch[]> {
+  const response = await fetch(functionsUrl('/search'), {
+    method: 'POST',
+    headers: adminHeaders(),
+    body: JSON.stringify({ query }),
+  });
+  const { results } = await parseOrThrow<{ results: KnowledgeSearchMatch[] }>(response);
+  return results;
+}
+
+export async function listEscalations(
+  params: ListEscalationsParams = {}
+): Promise<EscalationListItem[]> {
+  const query = new URLSearchParams();
+  if (params.statuses && params.statuses.length > 0) {
+    query.set('status', params.statuses.join(','));
+  }
+  if (params.from) query.set('from', params.from);
+  if (params.to) query.set('to', params.to);
+
+  const queryString = query.toString();
+  const response = await fetch(
+    functionsUrl(`/escalations${queryString ? `?${queryString}` : ''}`),
+    {
+      headers: adminHeaders(),
+      cache: 'no-store',
+    }
+  );
+  const { escalations } = await parseOrThrow<{ escalations: EscalationListItem[] }>(response);
+  return escalations;
+}
+
+export async function getEscalation(
+  id: string
+): Promise<{ escalation: EscalationListItem; messages: ConversationMessageRecord[] }> {
+  const response = await fetch(functionsUrl(`/escalations/${encodeURIComponent(id)}`), {
+    headers: adminHeaders(),
+    cache: 'no-store',
+  });
+  return parseOrThrow(response);
+}
+
+export async function updateEscalation(
+  id: string,
+  payload: UpdateEscalationPayload
+): Promise<{ escalation: ChatEscalationRecord }> {
+  const response = await fetch(functionsUrl(`/escalations/${encodeURIComponent(id)}`), {
+    method: 'PATCH',
+    headers: adminHeaders(),
+    body: JSON.stringify(payload),
+  });
+  return parseOrThrow(response);
+}
+
+export async function getWidgetConfig(): Promise<WidgetConfig> {
+  const response = await fetch(functionsUrl('/widget-config'), {
+    headers: adminHeaders(),
+    cache: 'no-store',
+  });
+  const { config } = await parseOrThrow<{ config: WidgetConfig }>(response);
+  return config;
+}
+
+export async function updateWidgetConfig(
+  payload: UpdateWidgetConfigPayload
+): Promise<WidgetConfig> {
+  const response = await fetch(functionsUrl('/widget-config'), {
+    method: 'PATCH',
+    headers: adminHeaders(),
+    body: JSON.stringify(payload),
+  });
+  const { config } = await parseOrThrow<{ config: WidgetConfig }>(response);
+  return config;
 }

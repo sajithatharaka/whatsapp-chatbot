@@ -2,12 +2,14 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Database, FileCode } from 'lucide-react';
+import { AlertCircle, Database, FileCode, MessageSquare } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 
 const NAV_ITEMS = [
   { href: '/dashboard/knowledge', label: 'Knowledge Base', icon: Database },
+  { href: '/dashboard/escalations', label: 'Needs Attention', icon: AlertCircle },
+  { href: '/dashboard/widget', label: 'Website Widget', icon: MessageSquare },
   { href: '/dashboard/api-docs', label: 'API Docs', icon: FileCode },
 ];
 

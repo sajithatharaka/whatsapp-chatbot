@@ -44,6 +44,18 @@ verify_jwt = true
 enabled = true
 verify_jwt = true
 
+[functions.escalations]
+enabled = true
+verify_jwt = true
+
+[functions.web-chat]
+enabled = true
+verify_jwt = true
+
+[functions.widget-config]
+enabled = true
+verify_jwt = true
+
 [functions.health]
 enabled = true
 verify_jwt = false

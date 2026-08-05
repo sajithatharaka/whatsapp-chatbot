@@ -26,6 +26,8 @@ Applied in order via `npm run db:push`:
   rolling summaries.
 - `seed_ai_configuration_default` — default active `ai_configuration` row.
 - `add_knowledge_documents_source_unique` — uniqueness constraint on document source.
+- `add_timezone_to_ai_configuration` — adds `ai_configuration.timezone` (default `'UTC'`), used to
+  render the current date/time in the system prompt (see Change history).
 - `grant_service_role_table_privileges` — plain SQL `GRANT`s for `service_role` on every table above
   plus `match_knowledge_chunks`, and a `default privileges` rule so future tables/functions inherit
   them. RLS-enabled-with-no-policies only blocks anon/authenticated; `service_role` has `BYPASSRLS`
@@ -164,6 +166,28 @@ committed with real values (see `.gitignore`).
   from the environment this fix was written in (network policy blocked `developers.cloudflare.com`),
   so the header name/behavior was corroborated via search rather than a direct docs read — worth a
   quick cross-check against current Cloudflare AI Gateway docs if this doesn't clear the 429s.
+- **2026-08-05 — `chat` couldn't answer "what day is it" / "are you open today".** The model has
+  no clock, and the system prompt built by `_shared/prompt-builder.ts` never told it the current
+  date, so any question needing today's day-of-week (open/closed checks against business hours in
+  the retrieved knowledge) got a "I don't have real-time access to the date" non-answer instead of
+  a real one. Fixed by adding `ai_configuration.timezone` (new column, default `'UTC'`, migration
+  `20260805010000_add_timezone_to_ai_configuration.sql`) and having `buildMessages()` inject a
+  `Current date and time: <weekday, date, time> (<timezone>)` line into the system prompt, computed
+  via `Intl.DateTimeFormat` in that timezone so the day-of-week is correct for the business's
+  locale, not the server's. `buildMessages()` takes an optional trailing `now: Date` (defaults to
+  `new Date()`) so tests can pin a specific instant instead of depending on wall-clock time.
+  Business hours themselves are unaffected — they still come entirely from retrieved knowledge
+  chunks; this change only gives the model the "today is ___" fact needed to reason about them.
+  Covered by `supabase/functions/_shared/prompt-builder.test.ts`. No admin UI exists yet to edit
+  `timezone` per business — it defaults to `'UTC'` until one is built; update via the Supabase
+  dashboard/SQL in the meantime.
+  Follow-up same day: the first version of this instruction led the model to narrate its
+  reasoning back to the customer (e.g. "Today is Wednesday, and according to our opening hours,
+  we are open from 08 to 05, so yes, we are open today") instead of just answering. The date/time
+  instruction in `buildMessages()` now explicitly says to use the date "silently" and to state the
+  conclusion directly (e.g. "Yes, we're open until 5pm today") without narrating how the day or
+  date was determined. Covered by the added "answer directly, don't narrate" case in
+  `prompt-builder.test.ts`.
 
 ## Acceptance Criteria
 
