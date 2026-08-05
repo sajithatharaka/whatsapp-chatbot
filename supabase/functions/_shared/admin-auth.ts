@@ -5,7 +5,7 @@ import { corsHeaders } from './cors.ts';
 // /reindex, and DELETE /knowledge/{id} mutate the knowledge base, so they
 // require a second, non-public shared secret on top of the anon/service JWT.
 // /chat and /search stay anon-key-only since they're read-only or meant to
-// be called from a semi-trusted orchestrator (Make.com).
+// be called from a semi-trusted orchestrator (ManyChat).
 export function requireAdminSecret(req: Request): Response | null {
   const expected = Deno.env.get('INGEST_ADMIN_SECRET');
   if (!expected) {

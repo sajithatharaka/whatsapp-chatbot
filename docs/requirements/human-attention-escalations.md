@@ -115,7 +115,7 @@ update and marking an escalation "responded" are separate manual actions:
 
 1. Admin records their answer to the customer (textarea → `PATCH admin_answer`). This is for
    context/knowledge-update purposes only — **replying to the customer still happens through the
-   existing Make.com/WhatsApp channel outside this repo** (no outbound send capability was added).
+   existing ManyChat/WhatsApp channel outside this repo** (no outbound send capability was added).
 2. After saving, the UI asks "Update the knowledge base with this answer?" On **Yes**, it calls
    `POST /api/knowledge/search` with the escalation's question, auto-picks the single top-ranked
    matching document, fetches its current content, and shows an editable proposal (`previous
@@ -158,7 +158,7 @@ No new variables — reuses `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_AN
 
 - Outbound WhatsApp sending from this app — the admin's recorded answer is for context and the
   knowledge-update workflow only; the actual customer-facing reply still goes through the existing
-  Make.com relay.
+  ManyChat relay.
 - A confidence-threshold-based escalation trigger (only the existing zero-chunk grounding gate is
   wired up, per product decision — see conversation history for this doc's origin).
 - Letting the admin choose among multiple candidate knowledge documents — the workflow auto-picks
