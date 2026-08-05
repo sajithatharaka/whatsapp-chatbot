@@ -1,6 +1,9 @@
 # Make.com — WhatsApp Orchestration — Requirements
 
 _Created: 2026-08-03_
+_Superseded: 2026-08-05 — this project uses ManyChat as its WhatsApp relay, not Make.com. See
+[manychat-whatsapp-integration.md](./manychat-whatsapp-integration.md) for the orchestration this
+repo actually integrates with. Kept for reference only, in case the orchestrator changes again._
 
 ## Overview
 
