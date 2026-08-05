@@ -7,7 +7,7 @@ export async function loadActiveConfig(supabase: SupabaseClient): Promise<AiConf
   const { data, error } = await supabase
     .from('ai_configuration')
     .select(
-      'id, chat_model, embedding_model, fallback_model, similarity_threshold, temperature, max_tokens, top_k, system_prompt, business_rules_prompt, fallback_message'
+      'id, chat_model, embedding_model, fallback_model, similarity_threshold, temperature, max_tokens, top_k, system_prompt, business_rules_prompt, fallback_message, timezone'
     )
     .eq('is_active', true)
     .single();

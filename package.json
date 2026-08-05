@@ -17,7 +17,7 @@
     "test:e2e": "playwright test",
     "db:push": "npx supabase link --project-ref $SUPABASE_PROJECT_ID && npx supabase db push --linked",
     "supabase:functions:serve": "npx supabase functions serve --env-file supabase/functions/.env",
-    "supabase:functions:deploy": "npx supabase functions deploy chat && npx supabase functions deploy ingest && npx supabase functions deploy search && npx supabase functions deploy reindex && npx supabase functions deploy knowledge && npx supabase functions deploy health",
+    "supabase:functions:deploy": "npx supabase functions deploy chat && npx supabase functions deploy ingest && npx supabase functions deploy search && npx supabase functions deploy reindex && npx supabase functions deploy knowledge && npx supabase functions deploy escalations && npx supabase functions deploy web-chat && npx supabase functions deploy widget-config && npx supabase functions deploy health",
     "supabase:secrets:set": "npx supabase secrets set --env-file supabase/functions/.env.production"
   },
   "lint-staged": {
@@ -42,7 +42,7 @@
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^6.0.5",
     "@vitest/coverage-v8": "^4.1.9",
-    "eslint": "^10.6.0",
+    "eslint": "^9.39.5",
     "eslint-plugin-jsx-a11y": "^6.10.2",
     "eslint-plugin-react-hooks": "^7.1.1",
     "husky": "^9.1.7",

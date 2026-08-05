@@ -15,15 +15,21 @@ describe('SidebarNav', () => {
 
     const knowledgeLink = screen.getByTestId('sidebar-nav-knowledge-base-link');
     const apiDocsLink = screen.getByTestId('sidebar-nav-api-docs-link');
+    const escalationsLink = screen.getByTestId('sidebar-nav-needs-attention-link');
+    const widgetLink = screen.getByTestId('sidebar-nav-website-widget-link');
 
     expect(knowledgeLink.className.split(' ')).toContain('bg-accent');
     expect(apiDocsLink.className.split(' ')).not.toContain('bg-accent');
+    expect(escalationsLink.className.split(' ')).not.toContain('bg-accent');
+    expect(widgetLink.className.split(' ')).not.toContain('bg-accent');
   });
 
-  it('renders exactly the two expected nav items', () => {
+  it('renders exactly the four expected nav items', () => {
     render(<SidebarNav />);
 
     expect(screen.getByText('Knowledge Base')).toBeInTheDocument();
+    expect(screen.getByText('Needs Attention')).toBeInTheDocument();
+    expect(screen.getByText('Website Widget')).toBeInTheDocument();
     expect(screen.getByText('API Docs')).toBeInTheDocument();
   });
 });

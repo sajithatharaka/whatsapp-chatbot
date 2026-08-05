@@ -46,18 +46,23 @@ export async function appendMessage(
   supabase: SupabaseClient,
   customerId: string,
   input: AppendMessageInput
-): Promise<void> {
-  const { error } = await supabase.from('conversation_messages').insert({
-    customer_id: customerId,
-    role: input.role,
-    message: input.message,
-    confidence: input.confidence ?? null,
-    model: input.model ?? null,
-    tool_used: input.toolUsed ?? null,
-    source_chunks: input.sourceChunks ?? [],
-  });
+): Promise<{ id: string }> {
+  const { data, error } = await supabase
+    .from('conversation_messages')
+    .insert({
+      customer_id: customerId,
+      role: input.role,
+      message: input.message,
+      confidence: input.confidence ?? null,
+      model: input.model ?? null,
+      tool_used: input.toolUsed ?? null,
+      source_chunks: input.sourceChunks ?? [],
+    })
+    .select('id')
+    .single();
 
   if (error) throw error;
+  return data as { id: string };
 }
 
 // Phase 1 stub: rolling summarization is deferred until conversations are

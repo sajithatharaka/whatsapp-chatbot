@@ -12,6 +12,8 @@ export function getServiceClient(): SupabaseClient {
   });
 }
 
+const CUSTOMER_COLUMNS = 'id, phone, name, preferred_language, channel, session_id';
+
 export async function findOrCreateCustomer(
   supabase: SupabaseClient,
   phone: string,
@@ -19,7 +21,7 @@ export async function findOrCreateCustomer(
 ): Promise<Customer> {
   const { data: existing, error: findError } = await supabase
     .from('customers')
-    .select('id, phone, name, preferred_language')
+    .select(CUSTOMER_COLUMNS)
     .eq('phone', phone)
     .maybeSingle();
 
@@ -33,7 +35,7 @@ export async function findOrCreateCustomer(
         .from('customers')
         .update({ name, updated_at: new Date().toISOString() })
         .eq('id', existing.id)
-        .select('id, phone, name, preferred_language')
+        .select(CUSTOMER_COLUMNS)
         .single();
       if (updateError) throw updateError;
       return updated as Customer;
@@ -43,8 +45,37 @@ export async function findOrCreateCustomer(
 
   const { data: created, error: insertError } = await supabase
     .from('customers')
-    .insert({ phone, name: name ?? null })
-    .select('id, phone, name, preferred_language')
+    .insert({ phone, name: name ?? null, channel: 'whatsapp' })
+    .select(CUSTOMER_COLUMNS)
+    .single();
+
+  if (insertError) throw insertError;
+  return created as Customer;
+}
+
+// Website widget counterpart to findOrCreateCustomer: visitors have no
+// phone number, only a browser-generated session id (see
+// src/lib/widget/buildWidgetScript.ts, persisted client-side in
+// localStorage) so returning visitors keep their conversation history/memory
+// the same way returning WhatsApp customers do.
+export async function findOrCreateWebCustomer(
+  supabase: SupabaseClient,
+  sessionId: string
+): Promise<Customer> {
+  const { data: existing, error: findError } = await supabase
+    .from('customers')
+    .select(CUSTOMER_COLUMNS)
+    .eq('channel', 'web')
+    .eq('session_id', sessionId)
+    .maybeSingle();
+
+  if (findError) throw findError;
+  if (existing) return existing as Customer;
+
+  const { data: created, error: insertError } = await supabase
+    .from('customers')
+    .insert({ channel: 'web', session_id: sessionId })
+    .select(CUSTOMER_COLUMNS)
     .single();
 
   if (insertError) throw insertError;

@@ -5,6 +5,11 @@ export interface ChatRequest {
   name?: string;
 }
 
+export interface WebChatRequest {
+  sessionId: string;
+  message: string;
+}
+
 export interface ChatResponse {
   reply: string;
   confidence: number;
@@ -26,13 +31,26 @@ export interface AiConfiguration {
   system_prompt: string;
   business_rules_prompt: string | null;
   fallback_message: string;
+  timezone: string;
 }
 
 export interface Customer {
   id: string;
-  phone: string;
+  phone: string | null;
   name: string | null;
   preferred_language: string | null;
+  channel: 'whatsapp' | 'web';
+  session_id: string | null;
+}
+
+export interface WebWidgetConfig {
+  id: string;
+  enabled: boolean;
+  title: string;
+  welcome_message: string;
+  primary_color: string;
+  position: 'bottom-right' | 'bottom-left';
+  allowed_origins: string[];
 }
 
 export interface RetrievedChunk {
