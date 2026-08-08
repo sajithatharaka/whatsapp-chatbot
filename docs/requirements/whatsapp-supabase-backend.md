@@ -188,6 +188,31 @@ committed with real values (see `.gitignore`).
   conclusion directly (e.g. "Yes, we're open until 5pm today") without narrating how the day or
   date was determined. Covered by the added "answer directly, don't narrate" case in
   `prompt-builder.test.ts`.
+- **2026-08-08 — `chat` fallback replies didn't match `ai_configuration.fallback_message`
+  exactly.** The zero-chunk grounding gate (`rag-pipeline.ts`) always returns `fallback_message`
+  verbatim, but when at least one chunk _did_ clear `similarity_threshold` and the LLM still
+  couldn't answer the specific question from it, the model fell back to its own wording (e.g. "I'm
+  sorry, I couldn't find that information in our knowledge base...") instead of the configured
+  text. Root cause: the seeded default `system_prompt` only told the model to "say so plainly" in
+  its own words — it never referenced `fallback_message` at all. This broke downstream automation
+  (the Make.com/WhatsApp relay) that branches on an exact string match against `fallback_message`
+  to decide whether to hand a conversation to a human.
+  Fixed by having `buildMessages()` in `_shared/prompt-builder.ts` append a final, non-optional
+  instruction — sourced from `config.fallback_message` itself rather than duplicated as a second
+  hardcoded string — telling the model to reply with that exact text and nothing else when the
+  retrieved knowledge doesn't answer the question. This applies regardless of what a business's
+  own `system_prompt`/`business_rules_prompt` say, since it's appended by code, not by prompt
+  content. The conflicting "say so plainly" clause was removed from the default seed prompt
+  (`20260802000008_seed_ai_configuration_default.sql`) and from any already-migrated database via
+  `20260808000000_fix_default_system_prompt_fallback_wording.sql` (matches only rows still holding
+  the exact original default text, so a customized prompt is left untouched).
+  Covered by the new "echo fallback_message verbatim" case in `prompt-builder.test.ts`.
+  Note: this is prompt-level compliance, not a deterministic code gate — the LLM can still fail to
+  follow the instruction, unlike the zero-chunk path which never calls the LLM at all. It also
+  doesn't create a `chat_escalations` row when it fires this way (only the zero-chunk gate does,
+  per the explicit "no confidence-threshold-based escalation trigger" scope decision in
+  [human-attention-escalations.md](./human-attention-escalations.md)) — worth revisiting if these
+  paraphrased-fallback episodes need the same human follow-up as zero-chunk ones.
 
 ## Acceptance Criteria
 
