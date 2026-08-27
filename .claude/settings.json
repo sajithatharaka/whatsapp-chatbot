@@ -27,7 +27,8 @@
       "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d.get\\('devDependencies',{}\\).get\\('@playwright/test','not found'\\)\\)\")",
       "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\('scripts',{}\\), indent=2\\)\\)\")",
       "Bash(pnpm test:coverage)",
-      "Bash(npx husky *)"
+      "Bash(npx husky *)",
+      "Bash(git checkout *)"
     ]
   }
 }

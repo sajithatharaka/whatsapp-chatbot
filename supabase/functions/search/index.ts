@@ -47,7 +47,7 @@ Deno.serve(async (req: Request) => {
     const topK = body.topK ?? config.top_k;
     const similarityThreshold = body.similarityThreshold ?? config.similarity_threshold;
 
-    const queryEmbedding = await embed(body.query, config.embedding_model);
+    const queryEmbedding = await embed(body.query, config.embedding_model, 'search_query');
     const results = await searchKnowledge(supabase, queryEmbedding, topK, similarityThreshold);
 
     return json({ query: body.query, topK, similarityThreshold, results });

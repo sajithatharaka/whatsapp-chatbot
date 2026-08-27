@@ -56,6 +56,10 @@ verify_jwt = true
 enabled = true
 verify_jwt = true
 
+[functions.ai-config]
+enabled = true
+verify_jwt = true
+
 [functions.health]
 enabled = true
 verify_jwt = false

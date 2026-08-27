@@ -1,7 +1,13 @@
+import { revalidateTag } from 'next/cache';
 import { NextResponse } from 'next/server';
 
 import type { UpdateWidgetConfigPayload } from '@/lib/widget/types';
-import { EdgeFunctionError, getWidgetConfig, updateWidgetConfig } from '@/lib/supabase/admin-api';
+import {
+  CACHE_TAGS,
+  EdgeFunctionError,
+  getWidgetConfig,
+  updateWidgetConfig,
+} from '@/lib/supabase/admin-api';
 import { UnauthenticatedError, requireAuthenticatedUser } from '@/lib/supabase/requireUser';
 
 export async function GET() {
@@ -27,6 +33,7 @@ export async function PATCH(request: Request) {
 
     const payload = (await request.json()) as UpdateWidgetConfigPayload;
     const config = await updateWidgetConfig(payload);
+    revalidateTag(CACHE_TAGS.widgetConfig);
 
     return NextResponse.json({ config });
   } catch (error) {

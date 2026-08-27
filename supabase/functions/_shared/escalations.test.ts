@@ -214,7 +214,7 @@ Deno.test('generateSummary returns the cached ai_summary without calling the LLM
 Deno.test(
   'generateSummary calls the LLM and persists the result when ai_summary is missing',
   async () => {
-    await withEnv({ CF_ACCOUNT_ID: 'acct-1', CF_API_TOKEN: 'token-1' }, async () => {
+    await withEnv({ OPENROUTER_API_KEY: 'key-1' }, async () => {
       const restore = stubFetch(
         async () =>
           new Response(

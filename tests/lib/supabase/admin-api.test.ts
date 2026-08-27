@@ -8,6 +8,7 @@ vi.mock('server-only', () => ({}));
 import {
   EdgeFunctionError,
   deleteKnowledgeDocument,
+  getAiConfig,
   getEscalation,
   getKnowledgeDocument,
   getWidgetConfig,
@@ -15,6 +16,7 @@ import {
   listEscalations,
   listKnowledgeDocuments,
   searchKnowledgeMatches,
+  updateAiConfig,
   updateEscalation,
   updateWidgetConfig,
 } from '../../../src/lib/supabase/admin-api';
@@ -62,6 +64,18 @@ describe('listKnowledgeDocuments', () => {
         }),
       })
     );
+  });
+
+  it('serves reads from the tagged Data Cache instead of cache: no-store', async () => {
+    const fetchMock = mockFetchOnce({ documents: [] });
+
+    await listKnowledgeDocuments();
+
+    const options = fetchMock.mock.calls[0][1] as RequestInit & {
+      next?: { revalidate?: number; tags?: string[] };
+    };
+    expect(options.cache).toBeUndefined();
+    expect(options.next).toEqual({ revalidate: 15, tags: ['knowledge'] });
   });
 });
 
@@ -170,6 +184,28 @@ describe('listEscalations', () => {
       expect.any(Object)
     );
   });
+
+  it('uses the tagged Data Cache by default', async () => {
+    const fetchMock = mockFetchOnce({ escalations: [] });
+
+    await listEscalations();
+
+    const options = fetchMock.mock.calls[0][1] as RequestInit & {
+      next?: { revalidate?: number; tags?: string[] };
+    };
+    expect(options.cache).toBeUndefined();
+    expect(options.next).toEqual({ revalidate: 15, tags: ['escalations'] });
+  });
+
+  it('bypasses the cache when called with { fresh: true }', async () => {
+    const fetchMock = mockFetchOnce({ escalations: [] });
+
+    await listEscalations({}, { fresh: true });
+
+    const options = fetchMock.mock.calls[0][1] as RequestInit & { next?: unknown };
+    expect(options.cache).toBe('no-store');
+    expect(options.next).toBeUndefined();
+  });
 });
 
 describe('getEscalation', () => {
@@ -247,5 +283,56 @@ describe('updateWidgetConfig', () => {
       'https://project-ref.supabase.co/functions/v1/widget-config',
       expect.objectContaining({ method: 'PATCH', body: JSON.stringify(payload) })
     );
+  });
+});
+
+describe('getAiConfig', () => {
+  it('calls GET /ai-config with admin/apikey headers via the tagged Data Cache', async () => {
+    const config = { id: 'config_1', chat_model: 'google/gemini-2.5-flash', temperature: 0.3 };
+    const fetchMock = mockFetchOnce({ config });
+
+    const result = await getAiConfig();
+
+    expect(result).toEqual(config);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://project-ref.supabase.co/functions/v1/ai-config',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          apikey: 'anon-key',
+          Authorization: 'Bearer anon-key',
+          'x-admin-secret': 'admin-secret',
+        }),
+      })
+    );
+    const options = fetchMock.mock.calls[0][1] as RequestInit & {
+      next?: { revalidate?: number; tags?: string[] };
+    };
+    expect(options.cache).toBeUndefined();
+    expect(options.next).toEqual({ revalidate: 15, tags: ['ai-config'] });
+  });
+});
+
+describe('updateAiConfig', () => {
+  it('calls PATCH /ai-config with the payload and returns the updated config', async () => {
+    const config = { id: 'config_1', chat_model: 'google/gemini-2.5-flash', temperature: 0.4 };
+    const fetchMock = mockFetchOnce({ config });
+
+    const payload = { temperature: 0.4 };
+    const result = await updateAiConfig(payload);
+
+    expect(result).toEqual(config);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://project-ref.supabase.co/functions/v1/ai-config',
+      expect.objectContaining({ method: 'PATCH', body: JSON.stringify(payload) })
+    );
+  });
+
+  it('propagates the error message from a non-2xx response', async () => {
+    mockFetchOnce({ error: 'Invalid update payload' }, false, 400);
+
+    await expect(updateAiConfig({ similarityThreshold: 2 })).rejects.toMatchObject({
+      status: 400,
+      message: 'Invalid update payload',
+    });
   });
 });

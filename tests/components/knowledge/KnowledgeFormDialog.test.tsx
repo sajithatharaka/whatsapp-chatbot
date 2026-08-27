@@ -78,7 +78,7 @@ describe('KnowledgeFormDialog', () => {
     expect(screen.queryByTestId('knowledge-form-content-textarea')).not.toBeInTheDocument();
   });
 
-  it('fetches and displays the previously ingested content when opening the edit dialog', async () => {
+  it('fetches the previously ingested content and pre-fills the editable content field', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -113,17 +113,73 @@ describe('KnowledgeFormDialog', () => {
     await user.click(screen.getByText('Edit'));
 
     expect(fetchMock).toHaveBeenCalledWith('/api/knowledge/doc_1');
-    await waitFor(() =>
-      expect(screen.getByTestId('knowledge-form-previous-content-textarea')).toHaveValue(
-        'First chunk.\n\nSecond chunk.'
-      )
-    );
-    expect(screen.getByTestId('knowledge-form-previous-content-textarea')).toHaveAttribute(
-      'readonly'
-    );
+    const contentTextarea = screen.getByTestId('knowledge-form-content-textarea');
+    await waitFor(() => expect(contentTextarea).toHaveValue('First chunk.\n\nSecond chunk.'));
+    expect(contentTextarea).not.toHaveAttribute('readonly');
+    expect(
+      screen.queryByTestId('knowledge-form-previous-content-textarea')
+    ).not.toBeInTheDocument();
   });
 
-  it('does not fetch or show previous content when creating a document', async () => {
+  it('lets the admin edit the pre-filled content before saving', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          document: { id: 'doc_1' },
+          chunks: [
+            {
+              id: 'chunk_1',
+              chunk_text: 'Old answer.',
+              metadata: {},
+              created_at: '2026-08-01T00:00:00Z',
+            },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          documentId: 'doc_1',
+          status: 'updated',
+          version: 2,
+          chunksCreated: 1,
+        }),
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const user = userEvent.setup();
+    render(
+      <KnowledgeFormDialog
+        mode="edit"
+        trigger={<button>Edit</button>}
+        initialValues={{ documentId: 'doc_1', title: 'FAQ', sourceType: 'text', source: '' }}
+      />
+    );
+
+    await user.click(screen.getByText('Edit'));
+
+    const contentTextarea = screen.getByTestId('knowledge-form-content-textarea');
+    await waitFor(() => expect(contentTextarea).toHaveValue('Old answer.'));
+
+    await user.clear(contentTextarea);
+    await user.type(contentTextarea, 'New answer.');
+    await user.click(screen.getByTestId('knowledge-form-submit-button'));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith('/api/knowledge', expect.any(Object))
+    );
+    const [, init] = fetchMock.mock.calls[1];
+    expect(JSON.parse(init.body)).toEqual({
+      sourceType: 'text',
+      documentId: 'doc_1',
+      title: 'FAQ',
+      content: 'New answer.',
+    });
+  });
+
+  it('does not fetch previous content when creating a document', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
@@ -133,9 +189,7 @@ describe('KnowledgeFormDialog', () => {
     await user.click(screen.getByText('Add document'));
 
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(
-      screen.queryByTestId('knowledge-form-previous-content-textarea')
-    ).not.toBeInTheDocument();
+    expect(screen.getByTestId('knowledge-form-content-textarea')).toHaveValue('');
   });
 
   it('submits the mapped payload to /api/knowledge', async () => {

@@ -1,6 +1,6 @@
 import { assertEquals } from 'https://deno.land/std@0.224.0/assert/mod.ts';
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
-import { documentHasChunks } from './knowledge.ts';
+import { documentHasChunks, updateChunkEmbedding } from './knowledge.ts';
 
 // Mocks the single chain ingest's checksum short-circuit relies on:
 // supabase.from('knowledge_chunks').select('id', { count: 'exact', head: true }).eq(...)
@@ -38,4 +38,34 @@ Deno.test('documentHasChunks throws on query error', async () => {
     threw = true;
   }
   assertEquals(threw, true);
+});
+
+// Regression coverage for the OpenRouter migration (qwen/qwen3-embedding-8b,
+// MRL-truncated to 1024 dims, vs. the old 768-dim bge-base-en-v1.5 vectors):
+// updateChunkEmbedding does no client-side length validation/truncation of
+// its own, so a 1024-dim vector from /reindex must pass through to the
+// update payload completely unchanged — dimension enforcement is entirely
+// the knowledge_chunks.embedding column's job (vector(1024), see
+// 20260827000000_resize_knowledge_chunks_embedding.sql).
+Deno.test('updateChunkEmbedding passes a 1024-dim vector through unmodified', async () => {
+  const newDimensionEmbedding = Array.from({ length: 1024 }, (_, i) => i / 1024);
+  let capturedPatch: unknown;
+  let capturedId: unknown;
+  const supabase = {
+    from: () => ({
+      update: (patch: unknown) => ({
+        eq: (_column: string, id: unknown) => {
+          capturedPatch = patch;
+          capturedId = id;
+          return Promise.resolve({ error: null });
+        },
+      }),
+    }),
+  } as unknown as SupabaseClient;
+
+  await updateChunkEmbedding(supabase, 'chunk-1', newDimensionEmbedding);
+
+  assertEquals(capturedId, 'chunk-1');
+  assertEquals((capturedPatch as { embedding: number[] }).embedding, newDimensionEmbedding);
+  assertEquals((capturedPatch as { embedding: number[] }).embedding.length, 1024);
 });

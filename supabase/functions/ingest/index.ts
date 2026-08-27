@@ -100,7 +100,7 @@ Deno.serve(async (req: Request) => {
     });
 
     const chunks = chunkText(cleaned);
-    const embeddings = await embedBatch(chunks, config.embedding_model);
+    const embeddings = await embedBatch(chunks, config.embedding_model, 'search_document');
     const chunksCreated = await replaceChunks(
       supabase,
       document.id,

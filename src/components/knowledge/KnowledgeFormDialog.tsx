@@ -80,7 +80,6 @@ export function KnowledgeFormDialog({ mode, trigger, initialValues }: KnowledgeF
     contentBase64: '',
   });
   const [fileName, setFileName] = useState<string | null>(null);
-  const [previousContent, setPreviousContent] = useState('');
   const [previousContentStatus, setPreviousContentStatus] = useState<
     'idle' | 'loading' | 'loaded' | 'error'
   >('idle');
@@ -88,7 +87,8 @@ export function KnowledgeFormDialog({ mode, trigger, initialValues }: KnowledgeF
   // Only chunked/derived text is stored (see KnowledgeChunksView), so this is
   // the closest reconstruction of "what's currently ingested" — not
   // guaranteed to match the original raw content for pdf/docx/website
-  // sources, which get transformed during chunking.
+  // sources, which get transformed during chunking. It pre-fills the editable
+  // Content field so the admin edits the existing text in place.
   useEffect(() => {
     if (!open || mode !== 'edit' || !values.documentId) return;
 
@@ -102,7 +102,10 @@ export function KnowledgeFormDialog({ mode, trigger, initialValues }: KnowledgeF
       })
       .then((body: { chunks: ViewableChunk[] }) => {
         if (cancelled) return;
-        setPreviousContent(body.chunks.map((chunk) => chunk.chunk_text).join('\n\n'));
+        setValues((prev) => ({
+          ...prev,
+          content: body.chunks.map((chunk) => chunk.chunk_text).join('\n\n'),
+        }));
         setPreviousContentStatus('loaded');
       })
       .catch(() => {
@@ -157,29 +160,9 @@ export function KnowledgeFormDialog({ mode, trigger, initialValues }: KnowledgeF
             <DialogDescription>
               {mode === 'create'
                 ? 'Add a new document to the assistant’s knowledge base.'
-                : 'Review the previously ingested content below, then provide the updated content — saving replaces the current version.'}
+                : 'Edit the previously ingested content below — saving replaces the current version.'}
             </DialogDescription>
           </DialogHeader>
-
-          {mode === 'edit' ? (
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="knowledge-form-previous-content">Previous content</Label>
-              {previousContentStatus === 'loading' ? (
-                <p className="text-xs text-muted-foreground">Loading previous content…</p>
-              ) : previousContentStatus === 'error' ? (
-                <p className="text-xs text-destructive">Couldn’t load the previous content.</p>
-              ) : (
-                <Textarea
-                  id="knowledge-form-previous-content"
-                  data-testid="knowledge-form-previous-content-textarea"
-                  readOnly
-                  rows={6}
-                  className="bg-muted"
-                  value={previousContent || 'No previous content ingested yet.'}
-                />
-              )}
-            </div>
-          ) : null}
 
           <div className="flex flex-col gap-2">
             <Label htmlFor="knowledge-form-title">Title</Label>
@@ -218,6 +201,14 @@ export function KnowledgeFormDialog({ mode, trigger, initialValues }: KnowledgeF
           {TEXT_LIKE_TYPES.has(values.sourceType) ? (
             <div className="flex flex-col gap-2">
               <Label htmlFor="knowledge-form-content">Content</Label>
+              {mode === 'edit' && previousContentStatus === 'loading' ? (
+                <p className="text-xs text-muted-foreground">Loading current content…</p>
+              ) : null}
+              {mode === 'edit' && previousContentStatus === 'error' ? (
+                <p className="text-xs text-destructive">
+                  Couldn’t load the current content — enter the new content below.
+                </p>
+              ) : null}
               <Textarea
                 id="knowledge-form-content"
                 data-testid="knowledge-form-content-textarea"

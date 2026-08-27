@@ -1,35 +1,28 @@
-'use client';
-
-import { useState } from 'react';
-
 import { EscalationFilters } from '@/components/escalations/EscalationFilters';
-import { EscalationList } from '@/components/escalations/EscalationList';
-import { EscalationListRefreshProvider } from '@/components/escalations/EscalationListRefreshContext';
+import { EscalationsWorkspace } from '@/components/escalations/EscalationsWorkspace';
+import { DEFAULT_STATUSES } from '@/lib/escalations/constants';
+import { listEscalations } from '@/lib/supabase/admin-api';
 
-export default function EscalationsLayout({ children }: { children: React.ReactNode }) {
-  const [refreshKey, setRefreshKey] = useState(0);
+export default async function EscalationsLayout({ children }: { children: React.ReactNode }) {
+  // First paint of the list is server-rendered for the default (unfiltered)
+  // view. If the URL carries filter params, EscalationList re-fetches on the
+  // client; otherwise it renders these rows straight away.
+  const initialEscalations = await listEscalations({ statuses: [...DEFAULT_STATUSES] });
 
   return (
-    <EscalationListRefreshProvider value={{ bump: () => setRefreshKey((key) => key + 1) }}>
-      <div className="flex flex-col gap-4">
-        <div>
-          <h1 className="text-lg font-semibold">Needs Attention</h1>
-          <p className="text-xs text-muted-foreground">
-            Escalated conversations needing a human reply.
-          </p>
-        </div>
-        {/* Shared by both panes below, so filtering doesn't require picking a
-            conversation first and stays visible no matter which is open. */}
-        <EscalationFilters />
-        <div className="flex gap-6">
-          <div className="flex w-80 shrink-0 flex-col border-r pr-4 md:w-96">
-            <div className="max-h-[70vh] overflow-y-auto">
-              <EscalationList refreshKey={refreshKey} />
-            </div>
-          </div>
-          <div className="min-w-0 flex-1">{children}</div>
-        </div>
+    <div className="flex flex-col gap-4">
+      <div>
+        <h1 className="text-lg font-semibold">Needs Attention</h1>
+        <p className="text-xs text-muted-foreground">
+          Escalated conversations needing a human reply.
+        </p>
       </div>
-    </EscalationListRefreshProvider>
+      {/* Shared by both panes below, so filtering doesn't require picking a
+          conversation first and stays visible no matter which is open. */}
+      <EscalationFilters />
+      <EscalationsWorkspace initialEscalations={initialEscalations}>
+        {children}
+      </EscalationsWorkspace>
+    </div>
   );
 }

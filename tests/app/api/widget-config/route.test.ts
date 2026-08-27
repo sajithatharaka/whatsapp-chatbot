@@ -2,13 +2,19 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('server-only', () => ({}));
 
-const { getWidgetConfigMock, updateWidgetConfigMock, requireAuthenticatedUserMock } = vi.hoisted(
-  () => ({
-    getWidgetConfigMock: vi.fn(),
-    updateWidgetConfigMock: vi.fn(),
-    requireAuthenticatedUserMock: vi.fn(),
-  })
-);
+const {
+  getWidgetConfigMock,
+  updateWidgetConfigMock,
+  requireAuthenticatedUserMock,
+  revalidateTagMock,
+} = vi.hoisted(() => ({
+  getWidgetConfigMock: vi.fn(),
+  updateWidgetConfigMock: vi.fn(),
+  requireAuthenticatedUserMock: vi.fn(),
+  revalidateTagMock: vi.fn(),
+}));
+
+vi.mock('next/cache', () => ({ revalidateTag: revalidateTagMock }));
 
 vi.mock('@/lib/supabase/admin-api', async () => {
   const actual = await vi.importActual<typeof import('../../../../src/lib/supabase/admin-api')>(
@@ -100,5 +106,6 @@ describe('PATCH /api/widget-config', () => {
     expect(response.status).toBe(200);
     expect(body).toEqual({ config });
     expect(updateWidgetConfigMock).toHaveBeenCalledWith(payload);
+    expect(revalidateTagMock).toHaveBeenCalledWith('widget-config');
   });
 });
