@@ -70,6 +70,17 @@ Deno.test('buildMessages defaults to the real current time when none is supplied
   assertStringIncludes(messages[0].content, 'Current date and time:');
 });
 
+Deno.test(
+  'buildMessages instructs the model to echo fallback_message verbatim when it cannot answer',
+  () => {
+    const config = baseConfig({ fallback_message: "Sorry, can't help with that — want a human?" });
+    const messages = buildMessages(config, null, [], chunks, 'are you open today?');
+
+    assertStringIncludes(messages[0].content, `"${config.fallback_message}"`);
+    assertStringIncludes(messages[0].content, 'Reply with exactly the following text');
+  }
+);
+
 Deno.test('buildMessages keeps the knowledge, summary, and conversation history sections', () => {
   const now = new Date('2026-08-05T10:30:00Z');
   const messages = buildMessages(

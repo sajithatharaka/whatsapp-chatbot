@@ -55,6 +55,15 @@ export function buildMessages(
     `Retrieved knowledge (this is the ONLY information you may use to answer):\n${knowledgeBlock}`
   );
 
+  // Downstream automations (e.g. the WhatsApp relay) branch on an exact string match against
+  // fallback_message, so the model must not paraphrase its own "I can't help" wording — it has
+  // to echo this back verbatim, or that branching silently breaks.
+  sections.push(
+    "If the retrieved knowledge above does not answer the customer's question, do not guess, " +
+      'partially answer, or explain why in your own words. Reply with exactly the following text ' +
+      `and nothing else — no greeting, no rephrasing:\n"${config.fallback_message}"`
+  );
+
   const messages: PromptMessage[] = [{ role: 'system', content: sections.join('\n\n') }];
 
   for (const turn of recentTurns) {
