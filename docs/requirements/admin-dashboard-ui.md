@@ -18,22 +18,41 @@ or build tooling for them — previously only the standalone analytics/turnstile
 - `src/lib/supabase/{client,server}.ts` — browser/server Supabase clients (`@supabase/ssr`).
 - `src/middleware.ts` + `src/lib/supabase/middleware.ts` — redirects unauthenticated requests to
   `/login` for every path except `/login` itself (matcher includes `/api/*`); redirects an
-  already-authenticated visitor away from `/login` to `/dashboard`. Uses `getUser()` (revalidates
-  against the Auth server), not `getSession()`.
+  already-authenticated visitor away from `/login` to `/dashboard`. Uses `getClaims()` — a
+  local JWT signature verification (cryptographically trustworthy, unlike `getSession()`)
+  that avoids an Auth-server round trip when the project uses asymmetric JWT signing keys;
+  see [dashboard-page-load-performance.md](./dashboard-page-load-performance.md).
 - `src/lib/supabase/requireUser.ts` — re-checked independently inside every Route Handler
-  (defense in depth beyond the middleware).
+  (defense in depth beyond the middleware), also via `getClaims()`; returns
+  `{ id, email }` from the verified claims.
 - `src/app/login/{page.tsx,actions.ts}` + `src/components/auth/LoginForm.tsx` — email/password
   sign-in via a Server Action (`useActionState`). **No sign-up page exists.** Admins are
   provisioned via the Supabase Dashboard (Authentication → Users → Invite) or
   `supabase.auth.admin.inviteUserByEmail` — this is an operational step, not a code path.
-- `src/app/dashboard/layout.tsx` re-checks auth again before rendering the shell.
+- `src/app/dashboard/layout.tsx` re-checks auth again (`getClaims()`) before rendering the
+  shell and reads the sidebar email from the verified claims.
 
 ### Sidebar shell
 
-`src/components/navigation/SidebarNav.tsx` — two items only (Knowledge Base, API Docs) under a
-"WORKSPACE" heading, active-state highlighting via `usePathname()`. `src/components/navigation/
-SignOutButton.tsx` calls the `signOut` Server Action. `src/app/dashboard/page.tsx` redirects to
-`/dashboard/knowledge` (no separate "Overview" page).
+`src/components/navigation/SidebarNav.tsx` — items (Knowledge Base, Needs Attention, Website
+Widget, API Docs, Settings) under a "WORKSPACE" heading, active-state highlighting via
+`usePathname()`. `src/components/navigation/SignOutButton.tsx` calls the `signOut` Server Action.
+`src/app/dashboard/page.tsx` redirects to `/dashboard/knowledge` (no separate "Overview" page).
+
+### Settings (`/dashboard/settings`)
+
+Manages the two configuration tables from one screen (see
+[settings-page.md](./settings-page.md)):
+
+- **AI assistant** — a form (`src/components/settings/AiConfigForm.tsx`) over the single active
+  `ai_configuration` row: `chat_model`, `embedding_model`, `fallback_model`,
+  `similarity_threshold`, `temperature`, `max_tokens`, `top_k`, `system_prompt`,
+  `business_rules_prompt`, `fallback_message`, `timezone`. Reads via `getAiConfig()` (Server
+  Component), writes via `PATCH /api/ai-config` → the new `ai-config` Edge Function. No migration —
+  it only ever `UPDATE`s the seeded row; changes take effect on the next `/chat` message. Changing
+  `embedding_model` still needs a `/reindex` (the form says so).
+- **Website widget** — a read-only summary card (`src/components/settings/WidgetConfigCard.tsx`)
+  linking to the existing `/dashboard/widget` page, which remains the place to edit it.
 
 ### Knowledge management (add/update/delete)
 
@@ -54,17 +73,20 @@ Wired directly to the real Edge Function contracts (`supabase/functions/knowledg
 KnowledgeChunksView,KnowledgeRowActions,KnowledgeDetailDeleteAction}.tsx` +
   `src/app/dashboard/knowledge/{page.tsx,[id]/page.tsx}`.
 - **"Update" re-ingests, it doesn't edit in place**: only chunked/derived text is stored, not the
-  original raw content, so the edit dialog prefills title/source/sourceType but requires fresh
-  content — the dialog copy says this explicitly.
-- **Edit dialog shows the previously ingested content (2026-08-04)**: opening
-  `KnowledgeFormDialog` in `mode="edit"` fetches `GET /api/knowledge/[id]` (new route handler,
-  wraps `getKnowledgeDocument`) and renders the document's existing chunks — joined with `\n\n`
-  in `chunk_index` order — in a read-only "Previous content" textarea above the editable fields,
-  so the reviewer isn't retyping/pasting blind. This is a reconstruction of the _chunked_ text,
-  not guaranteed to match the original raw source for `pdf`/`docx`/`website` types (chunking
-  transforms it); the textarea shows "No previous content ingested yet." if there are no chunks,
-  or an inline error if the fetch fails. No history/versioning table was added — there is still
-  only ever "current chunks" to show, not a diff against a prior edit.
+  original raw content, so the edit dialog prefills title/source/sourceType and (for text-like
+  types) the reconstructed content — saving re-ingests whatever is in the field.
+- **Edit dialog pre-fills the editable content field with the previously ingested text
+  (2026-08-04, revised 2026-08-27)**: opening `KnowledgeFormDialog` in `mode="edit"` fetches
+  `GET /api/knowledge/[id]` (route handler wrapping `getKnowledgeDocument`) and writes the
+  document's existing chunks — joined with `\n\n` in `chunk_index` order — straight into the
+  editable **Content** textarea (`knowledge-form-content-textarea`), so the admin edits the
+  current text in place rather than retyping it. There is no longer a separate read-only
+  "Previous content" textarea. This is a reconstruction of the _chunked_ text, not guaranteed to
+  match the original raw source for `pdf`/`docx`/`website` types (chunking transforms it, and
+  those types don't render the Content field anyway). While the fetch is in flight the Content
+  section shows a "Loading current content…" hint; on failure it shows an inline error and the
+  admin can still type fresh content. No history/versioning table was added — there is still only
+  ever "current chunks" to show, not a diff against a prior edit.
 - `reindex` is **not** wired into this UI (not requested; the Edge Function exists for future use).
 
 ### API documentation
@@ -124,7 +146,7 @@ react-hooks` and `eslint-plugin-jsx-a11y` do work under ESLint 10 despite simila
 - `npm test` — all unit/component tests pass; `/src` coverage thresholds (85%/85%/75%/75%) hold.
 - `npm run test:e2e` — unauthenticated-redirect smoke test passes (requires
   `NEXT_PUBLIC_SUPABASE_URL`/`NEXT_PUBLIC_SUPABASE_ANON_KEY` pointing at a reachable Supabase
-  project, local or hosted, since middleware calls `auth.getUser()` on every request).
+  project, local or hosted, since middleware calls `auth.getClaims()` on every request).
 
 ## Explicitly out of scope
 

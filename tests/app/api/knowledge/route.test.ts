@@ -4,10 +4,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 // the route module (which transitively imports admin-api.ts) can load here.
 vi.mock('server-only', () => ({}));
 
-const { ingestKnowledgeDocumentMock, requireAuthenticatedUserMock } = vi.hoisted(() => ({
-  ingestKnowledgeDocumentMock: vi.fn(),
-  requireAuthenticatedUserMock: vi.fn(),
-}));
+const { ingestKnowledgeDocumentMock, requireAuthenticatedUserMock, revalidateTagMock } = vi.hoisted(
+  () => ({
+    ingestKnowledgeDocumentMock: vi.fn(),
+    requireAuthenticatedUserMock: vi.fn(),
+    revalidateTagMock: vi.fn(),
+  })
+);
+
+vi.mock('next/cache', () => ({ revalidateTag: revalidateTagMock }));
 
 vi.mock('@/lib/supabase/admin-api', async () => {
   const actual = await vi.importActual<typeof import('../../../../src/lib/supabase/admin-api')>(
@@ -52,6 +57,7 @@ describe('POST /api/knowledge', () => {
 
     expect(response.status).toBe(401);
     expect(ingestKnowledgeDocumentMock).not.toHaveBeenCalled();
+    expect(revalidateTagMock).not.toHaveBeenCalled();
   });
 
   it('ingests and returns the result on success', async () => {
@@ -68,6 +74,7 @@ describe('POST /api/knowledge', () => {
 
     expect(response.status).toBe(200);
     expect(body.status).toBe('created');
+    expect(revalidateTagMock).toHaveBeenCalledWith('knowledge');
   });
 
   it('passes through the Edge Function error status', async () => {

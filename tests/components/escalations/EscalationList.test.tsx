@@ -82,6 +82,45 @@ describe('EscalationList', () => {
     );
   });
 
+  it('renders server-provided rows immediately without an initial fetch', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ escalations }) }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<EscalationList refreshKey={0} initialEscalations={escalations} />);
+
+    // No loading state, rows are present on first paint.
+    expect(screen.queryByTestId('escalation-list-loading-state')).not.toBeInTheDocument();
+    expect(screen.getByTestId('escalation-list-item-escalation_1')).toBeInTheDocument();
+
+    // Give any effect a chance to run — it must not fetch for the default view.
+    await waitFor(() => expect(fetchMock).not.toHaveBeenCalled());
+  });
+
+  it('still fetches when initial data is present but the URL carries a filter', async () => {
+    searchParamsMock.mockReturnValue(new URLSearchParams('status=responded'));
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ escalations: [] }) }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<EscalationList refreshKey={0} initialEscalations={escalations} />);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('status=responded'),
+      expect.objectContaining({ cache: 'no-store' })
+    );
+  });
+
+  it('refetches after a refreshKey bump even when seeded with initial data', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ escalations }) }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { rerender } = render(<EscalationList refreshKey={0} initialEscalations={escalations} />);
+    await waitFor(() => expect(fetchMock).not.toHaveBeenCalled());
+
+    rerender(<EscalationList refreshKey={1} initialEscalations={escalations} />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+  });
+
   it('shows the empty state when no escalations match', async () => {
     vi.stubGlobal(
       'fetch',

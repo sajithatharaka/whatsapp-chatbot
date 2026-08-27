@@ -42,18 +42,18 @@ Applied in order via `npm run db:push`:
 - `reindex` — admin-only: re-chunk/re-embed existing documents.
 - `knowledge` — admin CRUD over knowledge documents (delete is admin-only).
 - `health` — unauthenticated liveness check.
-- `_shared/` — shared helpers (Supabase service client, admin-secret auth, Cloudflare Workers AI
-  provider, chunking/checksum, prompt building, memory/summary, vector search, shared types).
+- `_shared/` — shared helpers (Supabase service client, admin-secret auth, OpenRouter provider,
+  chunking/checksum, prompt building, memory/summary, vector search, shared types).
 
-`_shared/ai-provider.ts` calls Cloudflare's Workers AI v1 (OpenAI-compatible) API —
-`https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/ai/v1/{chat/completions|embeddings}`
-— using `Authorization: Bearer {CF_API_TOKEN}`. When `CF_AI_GATEWAY_ID` is set, requests also carry
-a `cf-aig-gateway-id` header, routing them through that Cloudflare AI Gateway for gateway-side
-caching/rate-limiting/logging (see Change history); left unset, requests go straight to
-`api.cloudflare.com` with none of that. `config.chat_model` / `config.embedding_model` /
+`_shared/ai-provider.ts` calls OpenRouter's (OpenAI-compatible) API —
+`https://openrouter.ai/api/v1/{chat/completions|embeddings}` — using
+`Authorization: Bearer {OPENROUTER_API_KEY}`, plus static `HTTP-Referer`/`X-Title` attribution
+headers. As of 2026-08-27 this replaced Cloudflare Workers AI entirely (see Change history and
+`docs/requirements/openrouter-migration.md`, the doc of record for that migration); no gateway/
+opt-in header concept carried over. `config.chat_model` / `config.embedding_model` /
 `config.fallback_model` (from `ai_configuration`) are passed straight through as the `model`
-field; both native Workers AI ids (`@cf/...`) and the broader aggregated catalog (e.g.
-`openai/gpt-5-nano`) are accepted.
+field — OpenRouter's aggregated catalog (e.g. `google/gemini-2.5-flash`, `openai/gpt-4o-mini`,
+`qwen/qwen3-embedding-8b`) is accepted, not any single vendor's native ids.
 
 Function-level auth/enable state is declared in `supabase/config.toml` (`verify_jwt` per
 function). `ingest`, `reindex`, and the delete path on `knowledge` additionally require the
@@ -61,13 +61,12 @@ function). `ingest`, `reindex`, and the delete path on `knowledge` additionally 
 
 ## Environment variables
 
-| Variable                                                         | Where                                  | Purpose                                                 |
-| ---------------------------------------------------------------- | -------------------------------------- | ------------------------------------------------------- |
-| `SUPABASE_ACCESS_TOKEN`, `SUPABASE_PROJECT_ID`                   | root `.env.local`                      | CLI auth for `db:push` / `supabase:*` scripts only      |
-| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY` | injected by Supabase CLI/runtime       | Never set manually                                      |
-| `CF_ACCOUNT_ID`, `CF_API_TOKEN`                                  | `supabase/functions/.env(.production)` | Workers AI v1 API access for chat/embeddings            |
-| `CF_AI_GATEWAY_ID`                                               | `supabase/functions/.env(.production)` | Optional: routes Workers AI calls through an AI Gateway |
-| `INGEST_ADMIN_SECRET`                                            | `supabase/functions/.env(.production)` | Shared secret required on admin-mutating requests       |
+| Variable                                                         | Where                                  | Purpose                                            |
+| ---------------------------------------------------------------- | -------------------------------------- | -------------------------------------------------- |
+| `SUPABASE_ACCESS_TOKEN`, `SUPABASE_PROJECT_ID`                   | root `.env.local`                      | CLI auth for `db:push` / `supabase:*` scripts only |
+| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY` | injected by Supabase CLI/runtime       | Never set manually                                 |
+| `OPENROUTER_API_KEY`                                             | `supabase/functions/.env(.production)` | OpenRouter API access for chat/embeddings          |
+| `INGEST_ADMIN_SECRET`                                            | `supabase/functions/.env(.production)` | Shared secret required on admin-mutating requests  |
 
 `supabase/functions/.env.example` is the template for the function-local file; it is not
 committed with real values (see `.gitignore`).
@@ -213,6 +212,37 @@ committed with real values (see `.gitignore`).
   per the explicit "no confidence-threshold-based escalation trigger" scope decision in
   [human-attention-escalations.md](./human-attention-escalations.md)) — worth revisiting if these
   paraphrased-fallback episodes need the same human follow-up as zero-chunk ones.
+- **2026-08-27 — replaced Cloudflare Workers AI with OpenRouter (imprecise Sinhala retrieval).**
+  `@cf/baai/bge-base-en-v1.5`, the embedding model in place since this backend's original
+  migration, is English-only; Sinhala query/chunk embeddings it produced were low-quality enough
+  that genuine matches often scored below `similarity_threshold` and got dropped by the grounding
+  gate in `_shared/rag-pipeline.ts`, or the wrong chunks cleared the bar instead. Full detail,
+  model selection rationale, and testing in
+  [openrouter-migration.md](./openrouter-migration.md) — the doc of record for this change; this
+  entry only cross-references it per that document's own Scope. Summary: `_shared/ai-provider.ts`
+  now calls `https://openrouter.ai/api/v1/{chat/completions|embeddings}` instead of
+  `api.cloudflare.com`, dropping `CF_ACCOUNT_ID` / `CF_API_TOKEN` / `CF_AI_GATEWAY_ID` for
+  `OPENROUTER_API_KEY`; the active `ai_configuration` row now points at
+  `chat_model = google/gemini-2.5-flash`, `fallback_model = openai/gpt-4o-mini`,
+  `embedding_model = qwen/qwen3-embedding-8b` (chosen for confirmed Sinhala support); and
+  `knowledge_chunks.embedding` / `match_knowledge_chunks.query_embedding` were resized from
+  `vector(768)` to `vector(1024)` (Qwen3-Embedding truncated via OpenRouter's `dimensions` request
+  field — MRL truncation, confirmed against OpenRouter's API reference) via
+  `20260827000000_resize_knowledge_chunks_embedding.sql` and
+  `20260827000001_update_match_knowledge_chunks_dimension.sql`. Every existing chunk needs a
+  `/reindex` run after these migrations land — old vectors are wiped, not cast, since they're from
+  an incompatible embedding space. Also fixed a latent bug in `_shared/chunk.ts` surfaced by this
+  migration: its hard-split path sliced text by raw UTF-16 code-unit index, which can land inside
+  a Sinhala grapheme cluster (base consonant + dependent vowel sign/virama); rewritten to cut only
+  on `Intl.Segmenter` grapheme boundaries, covered by the new `_shared/chunk.test.ts`.
+  `similarity_threshold` was set to a **provisional** `0.50` in
+  `20260827000002_switch_ai_configuration_to_openrouter.sql` — `0.75` was tuned against
+  `bge-base-en-v1.5`'s score distribution and doesn't carry over; the real value still needs the
+  functional acceptance run against actual Sinhala question/expected-chunk pairs described in
+  openrouter-migration.md's Testing §6, which has not been executed yet (no live OpenRouter
+  key/knowledge base in the environment this migration was implemented in). Whoever runs that test
+  should land a follow-up migration with the calibrated threshold and record the results in
+  openrouter-migration.md's own Change history, per that document's Acceptance Criteria.
 
 ## Acceptance Criteria
 

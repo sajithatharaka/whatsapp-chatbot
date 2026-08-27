@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { AlertCircle, Database, FileCode, MessageSquare } from 'lucide-react';
+import { AlertCircle, Database, FileCode, MessageSquare, Settings } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 
@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { href: '/dashboard/escalations', label: 'Needs Attention', icon: AlertCircle },
   { href: '/dashboard/widget', label: 'Website Widget', icon: MessageSquare },
   { href: '/dashboard/api-docs', label: 'API Docs', icon: FileCode },
+  { href: '/dashboard/settings', label: 'Settings', icon: Settings },
 ];
 
 export function SidebarNav() {

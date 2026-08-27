@@ -1,7 +1,13 @@
+import { revalidateTag } from 'next/cache';
 import { NextResponse } from 'next/server';
 
 import type { UpdateEscalationPayload } from '@/lib/escalations/types';
-import { EdgeFunctionError, getEscalation, updateEscalation } from '@/lib/supabase/admin-api';
+import {
+  CACHE_TAGS,
+  EdgeFunctionError,
+  getEscalation,
+  updateEscalation,
+} from '@/lib/supabase/admin-api';
 import { UnauthenticatedError, requireAuthenticatedUser } from '@/lib/supabase/requireUser';
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -37,6 +43,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       ...payload,
       respondedBy: payload.status === 'responded' ? (user.email ?? undefined) : undefined,
     });
+    revalidateTag(CACHE_TAGS.escalations);
 
     return NextResponse.json(result);
   } catch (error) {

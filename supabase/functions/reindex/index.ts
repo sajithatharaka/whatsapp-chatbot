@@ -44,7 +44,8 @@ Deno.serve(async (req: Request) => {
       const batch = chunks.slice(i, i + BATCH_SIZE);
       const embeddings = await embedBatch(
         batch.map((chunk) => chunk.chunk_text),
-        config.embedding_model
+        config.embedding_model,
+        'search_document'
       );
       await Promise.all(
         batch.map((chunk, idx) => updateChunkEmbedding(supabase, chunk.id, embeddings[idx]))

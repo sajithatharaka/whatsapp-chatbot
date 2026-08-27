@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
-const { getUserMock } = vi.hoisted(() => ({ getUserMock: vi.fn() }));
+const { getClaimsMock } = vi.hoisted(() => ({ getClaimsMock: vi.fn() }));
 
 vi.mock('@supabase/ssr', () => ({
   createServerClient: () => ({
-    auth: { getUser: getUserMock },
+    auth: { getClaims: getClaimsMock },
   }),
 }));
 
@@ -15,9 +15,14 @@ function request(pathname: string) {
   return new NextRequest(new URL(pathname, 'http://localhost'));
 }
 
+// `getClaims()` resolves to `{ data: null }` when there is no session and
+// `{ data: { claims } }` once the JWT verifies (locally or via fallback).
+const NO_SESSION = { data: null };
+const SIGNED_IN = { data: { claims: { sub: 'user_1', email: 'admin@example.com' } } };
+
 describe('updateSession', () => {
   it('redirects unauthenticated visitors to /login for protected paths', async () => {
-    getUserMock.mockResolvedValue({ data: { user: null } });
+    getClaimsMock.mockResolvedValue(NO_SESSION);
 
     const response = await updateSession(request('/dashboard/knowledge'));
 
@@ -25,7 +30,7 @@ describe('updateSession', () => {
   });
 
   it('does not redirect unauthenticated visitors already on /login', async () => {
-    getUserMock.mockResolvedValue({ data: { user: null } });
+    getClaimsMock.mockResolvedValue(NO_SESSION);
 
     const response = await updateSession(request('/login'));
 
@@ -33,7 +38,7 @@ describe('updateSession', () => {
   });
 
   it('redirects authenticated visitors away from /login to /dashboard', async () => {
-    getUserMock.mockResolvedValue({ data: { user: { id: 'user_1' } } });
+    getClaimsMock.mockResolvedValue(SIGNED_IN);
 
     const response = await updateSession(request('/login'));
 
@@ -41,7 +46,7 @@ describe('updateSession', () => {
   });
 
   it('passes through authenticated requests to protected paths', async () => {
-    getUserMock.mockResolvedValue({ data: { user: { id: 'user_1' } } });
+    getClaimsMock.mockResolvedValue(SIGNED_IN);
 
     const response = await updateSession(request('/dashboard/knowledge'));
 

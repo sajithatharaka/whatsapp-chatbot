@@ -1,6 +1,8 @@
+import { revalidateTag } from 'next/cache';
 import { NextResponse } from 'next/server';
 
 import {
+  CACHE_TAGS,
   EdgeFunctionError,
   deleteKnowledgeDocument,
   getKnowledgeDocument,
@@ -32,6 +34,7 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
 
     const { id } = await params;
     const result = await deleteKnowledgeDocument(id);
+    revalidateTag(CACHE_TAGS.knowledge);
 
     return NextResponse.json(result);
   } catch (error) {

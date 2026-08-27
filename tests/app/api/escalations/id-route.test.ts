@@ -7,13 +7,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('server-only', () => ({}));
 
-const { getEscalationMock, updateEscalationMock, requireAuthenticatedUserMock } = vi.hoisted(
-  () => ({
+const { getEscalationMock, updateEscalationMock, requireAuthenticatedUserMock, revalidateTagMock } =
+  vi.hoisted(() => ({
     getEscalationMock: vi.fn(),
     updateEscalationMock: vi.fn(),
     requireAuthenticatedUserMock: vi.fn(),
-  })
-);
+    revalidateTagMock: vi.fn(),
+  }));
+
+vi.mock('next/cache', () => ({ revalidateTag: revalidateTagMock }));
 
 vi.mock('@/lib/supabase/admin-api', async () => {
   const actual = await vi.importActual<typeof import('../../../../src/lib/supabase/admin-api')>(
@@ -115,6 +117,7 @@ describe('PATCH /api/escalations/[id]', () => {
       status: 'responded',
       respondedBy: 'admin@example.com',
     });
+    expect(revalidateTagMock).toHaveBeenCalledWith('escalations');
   });
 
   it('does not set respondedBy for non-responded status updates', async () => {

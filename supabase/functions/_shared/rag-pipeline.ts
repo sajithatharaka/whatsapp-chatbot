@@ -17,7 +17,7 @@ export async function runRagPipeline(
   customer: Customer,
   message: string
 ): Promise<ChatResponse> {
-  const queryEmbedding = await embed(message, config.embedding_model);
+  const queryEmbedding = await embed(message, config.embedding_model, 'search_query');
   const chunks = await searchKnowledge(
     supabase,
     queryEmbedding,

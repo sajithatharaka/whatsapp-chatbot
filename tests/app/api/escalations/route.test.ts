@@ -58,11 +58,15 @@ describe('GET /api/escalations', () => {
       getRequest('?status=needs_attention,bogus,in_progress&from=2026-08-01&to=2026-08-05')
     );
 
-    expect(listEscalationsMock).toHaveBeenCalledWith({
-      statuses: ['needs_attention', 'in_progress'],
-      from: '2026-08-01',
-      to: '2026-08-05',
-    });
+    expect(listEscalationsMock).toHaveBeenCalledWith(
+      {
+        statuses: ['needs_attention', 'in_progress'],
+        from: '2026-08-01',
+        to: '2026-08-05',
+      },
+      // client-refresh route must bypass the Data Cache
+      { fresh: true }
+    );
   });
 
   it('returns the escalations list on success', async () => {

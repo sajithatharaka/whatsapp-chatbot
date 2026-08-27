@@ -31,11 +31,14 @@ export async function updateSession(request: NextRequest) {
     }
   );
 
-  // `getUser()` revalidates the session against the Auth server rather than
-  // trusting the (spoofable) session cookie, unlike `getSession()`.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // `getClaims()` cryptographically verifies the JWT signature locally against
+  // the project's (cached) JWKS — trustworthy like `getUser()` but without a
+  // per-request round trip to the Auth server, as long as the project uses
+  // asymmetric JWT signing keys. For legacy HS256 secrets it transparently
+  // falls back to a `getUser()` network call, so there is no behavioural
+  // regression before keys are rotated.
+  const { data } = await supabase.auth.getClaims();
+  const user = data?.claims ?? null;
 
   if (!user && !isPublicPath(request.nextUrl.pathname)) {
     const redirectUrl = request.nextUrl.clone();

@@ -93,8 +93,8 @@ function fakeSupabase(options: {
 
 const BASE_CONFIG: AiConfiguration = {
   id: 'config-1',
-  chat_model: 'openai/gpt-5-nano',
-  embedding_model: '@cf/baai/bge-base-en-v1.5',
+  chat_model: 'google/gemini-2.5-flash',
+  embedding_model: 'qwen/qwen3-embedding-8b',
   fallback_model: null,
   similarity_threshold: 0.75,
   temperature: 0.3,
@@ -118,7 +118,7 @@ const CUSTOMER: Customer = {
 Deno.test(
   'runRagPipeline returns the fallback message and escalates when no chunks are retrieved',
   async () => {
-    await withEnv({ CF_ACCOUNT_ID: 'acct-1', CF_API_TOKEN: 'token-1' }, async () => {
+    await withEnv({ OPENROUTER_API_KEY: 'key-1' }, async () => {
       let chatCompleteCalled = false;
       const restore = stubFetch(async (input) => {
         if (String(input).includes('embeddings')) return embeddingResponse();
@@ -150,7 +150,7 @@ Deno.test(
 );
 
 Deno.test('runRagPipeline returns a grounded reply when chunks are retrieved', async () => {
-  await withEnv({ CF_ACCOUNT_ID: 'acct-1', CF_API_TOKEN: 'token-1' }, async () => {
+  await withEnv({ OPENROUTER_API_KEY: 'key-1' }, async () => {
     const restore = stubFetch(async (input) => {
       if (String(input).includes('embeddings')) return embeddingResponse();
       return new Response(JSON.stringify({ choices: [{ message: { content: 'We are open!' } }] }), {
@@ -178,7 +178,7 @@ Deno.test('runRagPipeline returns a grounded reply when chunks are retrieved', a
 Deno.test(
   'runRagPipeline falls back to fallback_model when the primary model call fails',
   async () => {
-    await withEnv({ CF_ACCOUNT_ID: 'acct-1', CF_API_TOKEN: 'token-1' }, async () => {
+    await withEnv({ OPENROUTER_API_KEY: 'key-1' }, async () => {
       const capturedModels: string[] = [];
       const restore = stubFetch(async (input, init) => {
         if (String(input).includes('embeddings')) return embeddingResponse();

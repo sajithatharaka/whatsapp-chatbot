@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -19,7 +19,13 @@ type ListState =
   | { status: 'error' }
   | { status: 'loaded'; escalations: EscalationListItem[] };
 
-export function EscalationList({ refreshKey }: { refreshKey: number }) {
+export function EscalationList({
+  refreshKey,
+  initialEscalations,
+}: {
+  refreshKey: number;
+  initialEscalations?: EscalationListItem[];
+}) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
@@ -28,10 +34,27 @@ export function EscalationList({ refreshKey }: { refreshKey: number }) {
   const toParam = searchParams.get('to');
   const selectedId = pathname.match(DETAIL_PATH)?.[1];
 
-  const [state, setState] = useState<ListState>({ status: 'loading' });
+  const [state, setState] = useState<ListState>(
+    initialEscalations
+      ? { status: 'loaded', escalations: initialEscalations }
+      : { status: 'loading' }
+  );
   const [retryToken, setRetryToken] = useState(0);
 
+  // The server-rendered list (`initialEscalations`) only covers the default,
+  // unfiltered view. When it's present and the URL carries no filters, skip the
+  // redundant fetch on mount; any later filter change / retry / refreshKey bump
+  // still goes through the effect and hits the network.
+  const canUseInitialData = useRef(
+    Boolean(initialEscalations) && !statusParam && !fromParam && !toParam
+  );
+
   useEffect(() => {
+    if (canUseInitialData.current) {
+      canUseInitialData.current = false;
+      return;
+    }
+
     let cancelled = false;
     setState({ status: 'loading' });
 

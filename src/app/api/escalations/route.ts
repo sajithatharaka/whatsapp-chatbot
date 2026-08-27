@@ -16,11 +16,16 @@ export async function GET(request: Request) {
       .map((s) => s.trim())
       .filter((s): s is EscalationStatus => (VALID_STATUSES as string[]).includes(s));
 
-    const escalations = await listEscalations({
-      statuses: statuses && statuses.length > 0 ? statuses : undefined,
-      from: url.searchParams.get('from') ?? undefined,
-      to: url.searchParams.get('to') ?? undefined,
-    });
+    const escalations = await listEscalations(
+      {
+        statuses: statuses && statuses.length > 0 ? statuses : undefined,
+        from: url.searchParams.get('from') ?? undefined,
+        to: url.searchParams.get('to') ?? undefined,
+      },
+      // This route backs the client-side refresh/retry in EscalationList, which
+      // must always reflect the latest state — bypass the Data Cache.
+      { fresh: true }
+    );
 
     return NextResponse.json({ escalations });
   } catch (error) {

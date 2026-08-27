@@ -1,6 +1,7 @@
+import { revalidateTag } from 'next/cache';
 import { NextResponse } from 'next/server';
 
-import { EdgeFunctionError, ingestKnowledgeDocument } from '@/lib/supabase/admin-api';
+import { CACHE_TAGS, EdgeFunctionError, ingestKnowledgeDocument } from '@/lib/supabase/admin-api';
 import { UnauthenticatedError, requireAuthenticatedUser } from '@/lib/supabase/requireUser';
 import type { IngestRequestBody } from '@/lib/knowledge/types';
 
@@ -10,6 +11,7 @@ export async function POST(request: Request) {
 
     const payload = (await request.json()) as IngestRequestBody;
     const result = await ingestKnowledgeDocument(payload);
+    revalidateTag(CACHE_TAGS.knowledge);
 
     return NextResponse.json(result);
   } catch (error) {
