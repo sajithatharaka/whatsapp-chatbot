@@ -43,10 +43,15 @@ const ESCALATION_COLUMNS =
 
 const OPEN_STATUSES: EscalationStatus[] = ['needs_attention', 'in_progress'];
 
+// Every query/mutation below is scoped by business_id (see
+// docs/requirements/mixed-language-multi-tenant-architecture-plan.md, Phase 0) so an escalation
+// id from one business can never be read or updated by another.
+//
 // One open escalation per customer at a time: repeating the same unanswered
 // question shouldn't pile up duplicate rows in the admin list.
 export async function createEscalationIfNeeded(
   supabase: SupabaseClient,
+  businessId: string,
   customerId: string,
   triggerMessageId: string,
   question: string
@@ -54,6 +59,7 @@ export async function createEscalationIfNeeded(
   const { data: existing, error: findError } = await supabase
     .from('chat_escalations')
     .select('id')
+    .eq('business_id', businessId)
     .eq('customer_id', customerId)
     .in('status', OPEN_STATUSES)
     .limit(1)
@@ -62,6 +68,7 @@ export async function createEscalationIfNeeded(
   if (existing) return;
 
   const { error: insertError } = await supabase.from('chat_escalations').insert({
+    business_id: businessId,
     customer_id: customerId,
     trigger_message_id: triggerMessageId,
     question,
@@ -74,6 +81,7 @@ export async function createEscalationIfNeeded(
 // use (see knowledge.test.ts) and avoids relying on untested join syntax.
 async function attachCustomers(
   supabase: SupabaseClient,
+  businessId: string,
   escalations: ChatEscalationRecord[]
 ): Promise<EscalationListItem[]> {
   if (escalations.length === 0) return [];
@@ -82,6 +90,7 @@ async function attachCustomers(
   const { data, error } = await supabase
     .from('customers')
     .select('id, phone, name, channel')
+    .eq('business_id', businessId)
     .in('id', customerIds);
   if (error) throw error;
 
@@ -106,11 +115,13 @@ export interface ListEscalationsFilter {
 
 export async function listEscalations(
   supabase: SupabaseClient,
+  businessId: string,
   filter: ListEscalationsFilter = {}
 ): Promise<EscalationListItem[]> {
   let query = supabase
     .from('chat_escalations')
     .select(ESCALATION_COLUMNS)
+    .eq('business_id', businessId)
     .order('created_at', { ascending: false });
 
   if (filter.statuses && filter.statuses.length > 0) {
@@ -121,32 +132,38 @@ export async function listEscalations(
 
   const { data, error } = await query;
   if (error) throw error;
-  return attachCustomers(supabase, (data ?? []) as ChatEscalationRecord[]);
+  return attachCustomers(supabase, businessId, (data ?? []) as ChatEscalationRecord[]);
 }
 
 export async function findEscalationById(
   supabase: SupabaseClient,
+  businessId: string,
   id: string
 ): Promise<EscalationListItem | null> {
   const { data, error } = await supabase
     .from('chat_escalations')
     .select(ESCALATION_COLUMNS)
+    .eq('business_id', businessId)
     .eq('id', id)
     .maybeSingle();
   if (error) throw error;
   if (!data) return null;
 
-  const [withCustomer] = await attachCustomers(supabase, [data as ChatEscalationRecord]);
+  const [withCustomer] = await attachCustomers(supabase, businessId, [
+    data as ChatEscalationRecord,
+  ]);
   return withCustomer;
 }
 
 export async function listMessagesForCustomer(
   supabase: SupabaseClient,
+  businessId: string,
   customerId: string
 ): Promise<EscalationMessage[]> {
   const { data, error } = await supabase
     .from('conversation_messages')
     .select('id, role, message, confidence, created_at')
+    .eq('business_id', businessId)
     .eq('customer_id', customerId)
     .order('created_at', { ascending: true });
   if (error) throw error;
@@ -162,6 +179,7 @@ export interface UpdateEscalationInput {
 
 export async function updateEscalation(
   supabase: SupabaseClient,
+  businessId: string,
   id: string,
   input: UpdateEscalationInput
 ): Promise<ChatEscalationRecord> {
@@ -183,6 +201,7 @@ export async function updateEscalation(
     .from('chat_escalations')
     .update(patch)
     .eq('id', id)
+    .eq('business_id', businessId)
     .select(ESCALATION_COLUMNS)
     .single();
   if (error) throw error;
@@ -193,6 +212,7 @@ export async function updateEscalation(
 // the extra LLM call off the WhatsApp-facing hot path in chat/index.ts.
 export async function generateSummary(
   supabase: SupabaseClient,
+  businessId: string,
   config: AiConfiguration,
   escalation: ChatEscalationRecord,
   messages: EscalationMessage[]
@@ -217,7 +237,8 @@ export async function generateSummary(
   const { error } = await supabase
     .from('chat_escalations')
     .update({ ai_summary: summary })
-    .eq('id', escalation.id);
+    .eq('id', escalation.id)
+    .eq('business_id', businessId);
   if (error) throw error;
 
   return summary;

@@ -1,3 +1,4 @@
+import { resolveDefaultBusinessId } from '../_shared/business.ts';
 import { loadActiveConfig } from '../_shared/config.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 import { findOrCreateWebCustomer, getServiceClient } from '../_shared/db.ts';
@@ -46,7 +47,10 @@ Deno.serve(async (req: Request) => {
 
   try {
     const supabase = getServiceClient();
-    const widgetConfig = await loadActiveWidgetConfig(supabase);
+    // Phase 0: this is the one seeded business until a later phase gives the widget script its
+    // own per-business identifier (see supabase/functions/_shared/business.ts).
+    const businessId = await resolveDefaultBusinessId(supabase);
+    const widgetConfig = await loadActiveWidgetConfig(supabase, businessId);
     const origin = req.headers.get('origin');
 
     if (!isOriginAllowed(widgetConfig, origin)) {
@@ -75,8 +79,8 @@ Deno.serve(async (req: Request) => {
     }
 
     const { sessionId, message } = body;
-    const config = await loadActiveConfig(supabase);
-    const customer = await findOrCreateWebCustomer(supabase, sessionId);
+    const config = await loadActiveConfig(supabase, businessId);
+    const customer = await findOrCreateWebCustomer(supabase, businessId, sessionId);
 
     if (await isRateLimited(supabase, customer.id, RATE_LIMIT)) {
       return json(
@@ -85,7 +89,13 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const response: ChatResponse = await runRagPipeline(supabase, config, customer, message);
+    const response: ChatResponse = await runRagPipeline(
+      supabase,
+      businessId,
+      config,
+      customer,
+      message
+    );
     return json(response);
   } catch (error) {
     console.error('web-chat function error:', error);

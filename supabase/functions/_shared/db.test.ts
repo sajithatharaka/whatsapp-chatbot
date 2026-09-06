@@ -2,6 +2,29 @@ import { assertEquals } from 'https://deno.land/std@0.224.0/assert/mod.ts';
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 import { findOrCreateWebCustomer } from './db.ts';
 
+const BUSINESS_ID = 'business-1';
+
+// Mocks the single chain findOrCreateWebCustomer relies on:
+// supabase.from('customers').select(...).eq('business_id', ...).eq('channel', 'web').eq('session_id', ...).maybeSingle()
+function fakeClient(existing: unknown, error: Error | null = null) {
+  return {
+    from: () => ({
+      select: () => ({
+        eq: () => ({
+          eq: () => ({
+            eq: () => ({
+              maybeSingle: () => Promise.resolve({ data: existing, error }),
+            }),
+          }),
+        }),
+      }),
+      insert: () => ({
+        select: () => ({ single: () => Promise.resolve({ data: null, error: null }) }),
+      }),
+    }),
+  } as unknown as SupabaseClient;
+}
+
 Deno.test(
   'findOrCreateWebCustomer returns the existing customer for a known session id',
   async () => {
@@ -19,7 +42,9 @@ Deno.test(
         select: () => ({
           eq: () => ({
             eq: () => ({
-              maybeSingle: () => Promise.resolve({ data: existing, error: null }),
+              eq: () => ({
+                maybeSingle: () => Promise.resolve({ data: existing, error: null }),
+              }),
             }),
           }),
         }),
@@ -30,7 +55,7 @@ Deno.test(
       }),
     } as unknown as SupabaseClient;
 
-    const result = await findOrCreateWebCustomer(supabase, 'session-1');
+    const result = await findOrCreateWebCustomer(supabase, BUSINESS_ID, 'session-1');
     assertEquals(result, existing);
     assertEquals(insertCalled, false);
   }
@@ -53,7 +78,9 @@ Deno.test(
         select: () => ({
           eq: () => ({
             eq: () => ({
-              maybeSingle: () => Promise.resolve({ data: null, error: null }),
+              eq: () => ({
+                maybeSingle: () => Promise.resolve({ data: null, error: null }),
+              }),
             }),
           }),
         }),
@@ -66,28 +93,22 @@ Deno.test(
       }),
     } as unknown as SupabaseClient;
 
-    const result = await findOrCreateWebCustomer(supabase, 'session-2');
+    const result = await findOrCreateWebCustomer(supabase, BUSINESS_ID, 'session-2');
     assertEquals(result, created);
-    assertEquals(insertedRow, { channel: 'web', session_id: 'session-2' });
+    assertEquals(insertedRow, {
+      business_id: BUSINESS_ID,
+      channel: 'web',
+      session_id: 'session-2',
+    });
   }
 );
 
 Deno.test('findOrCreateWebCustomer throws on a lookup error', async () => {
-  const supabase = {
-    from: () => ({
-      select: () => ({
-        eq: () => ({
-          eq: () => ({
-            maybeSingle: () => Promise.resolve({ data: null, error: new Error('boom') }),
-          }),
-        }),
-      }),
-    }),
-  } as unknown as SupabaseClient;
+  const supabase = fakeClient(null, new Error('boom'));
 
   let threw = false;
   try {
-    await findOrCreateWebCustomer(supabase, 'session-3');
+    await findOrCreateWebCustomer(supabase, BUSINESS_ID, 'session-3');
   } catch {
     threw = true;
   }

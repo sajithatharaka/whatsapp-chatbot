@@ -4,13 +4,17 @@ import type { WebWidgetConfig } from './types.ts';
 const WIDGET_CONFIG_COLUMNS =
   'id, enabled, title, welcome_message, primary_color, position, allowed_origins';
 
-// Mirrors config.ts's loadActiveConfig: no caching, single active row, reads
+// Mirrors config.ts's loadActiveConfig: no caching, single active row per business, reads
 // fresh so a dashboard change (enable/disable, allowed_origins, branding)
 // takes effect on the very next widget request.
-export async function loadActiveWidgetConfig(supabase: SupabaseClient): Promise<WebWidgetConfig> {
+export async function loadActiveWidgetConfig(
+  supabase: SupabaseClient,
+  businessId: string
+): Promise<WebWidgetConfig> {
   const { data, error } = await supabase
     .from('web_widget_config')
     .select(WIDGET_CONFIG_COLUMNS)
+    .eq('business_id', businessId)
     .eq('is_active', true)
     .single();
 
@@ -29,6 +33,7 @@ export interface UpdateWidgetConfigInput {
 
 export async function updateWidgetConfig(
   supabase: SupabaseClient,
+  businessId: string,
   input: UpdateWidgetConfigInput
 ): Promise<WebWidgetConfig> {
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
@@ -42,6 +47,7 @@ export async function updateWidgetConfig(
   const { data, error } = await supabase
     .from('web_widget_config')
     .update(patch)
+    .eq('business_id', businessId)
     .eq('is_active', true)
     .select(WIDGET_CONFIG_COLUMNS)
     .single();

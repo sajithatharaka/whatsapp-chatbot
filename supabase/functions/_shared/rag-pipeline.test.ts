@@ -48,8 +48,10 @@ function fakeSupabase(options: {
           }),
           select: () => ({
             eq: () => ({
-              order: () => ({
-                limit: () => Promise.resolve({ data: recentTurns, error: null }),
+              eq: () => ({
+                order: () => ({
+                  limit: () => Promise.resolve({ data: recentTurns, error: null }),
+                }),
               }),
             }),
           }),
@@ -59,11 +61,13 @@ function fakeSupabase(options: {
         return {
           select: () => ({
             eq: () => ({
-              maybeSingle: () =>
-                Promise.resolve({
-                  data: options.summary ? { summary: options.summary } : null,
-                  error: null,
-                }),
+              eq: () => ({
+                maybeSingle: () =>
+                  Promise.resolve({
+                    data: options.summary ? { summary: options.summary } : null,
+                    error: null,
+                  }),
+              }),
             }),
           }),
         };
@@ -72,10 +76,12 @@ function fakeSupabase(options: {
         return {
           select: () => ({
             eq: () => ({
-              in: () => ({
-                limit: () => ({
-                  maybeSingle: () =>
-                    Promise.resolve({ data: options.existingEscalation ?? null, error: null }),
+              eq: () => ({
+                in: () => ({
+                  limit: () => ({
+                    maybeSingle: () =>
+                      Promise.resolve({ data: options.existingEscalation ?? null, error: null }),
+                  }),
                 }),
               }),
             }),
@@ -90,6 +96,8 @@ function fakeSupabase(options: {
     },
   } as unknown as SupabaseClient;
 }
+
+const BUSINESS_ID = 'business-1';
 
 const BASE_CONFIG: AiConfiguration = {
   id: 'config-1',
@@ -135,7 +143,13 @@ Deno.test(
       });
 
       try {
-        const result = await runRagPipeline(supabase, BASE_CONFIG, CUSTOMER, 'Are you open today?');
+        const result = await runRagPipeline(
+          supabase,
+          BUSINESS_ID,
+          BASE_CONFIG,
+          CUSTOMER,
+          'Are you open today?'
+        );
         assertEquals(result.intent, 'fallback');
         assertEquals(result.confidence, 0);
         assertEquals(result.reply, BASE_CONFIG.fallback_message);
@@ -164,7 +178,13 @@ Deno.test('runRagPipeline returns a grounded reply when chunks are retrieved', a
     const supabase = fakeSupabase({ chunks });
 
     try {
-      const result = await runRagPipeline(supabase, BASE_CONFIG, CUSTOMER, 'Are you open today?');
+      const result = await runRagPipeline(
+        supabase,
+        BUSINESS_ID,
+        BASE_CONFIG,
+        CUSTOMER,
+        'Are you open today?'
+      );
       assertEquals(result.intent, 'knowledge');
       assertEquals(result.reply, 'We are open!');
       assertEquals(result.confidence, 0.91);
@@ -206,7 +226,13 @@ Deno.test(
       };
 
       try {
-        const result = await runRagPipeline(supabase, config, CUSTOMER, 'Are you open today?');
+        const result = await runRagPipeline(
+          supabase,
+          BUSINESS_ID,
+          config,
+          CUSTOMER,
+          'Are you open today?'
+        );
         assertEquals(result.reply, 'Fallback reply');
         assertEquals(capturedModels, ['primary-model', 'fallback-model']);
       } finally {

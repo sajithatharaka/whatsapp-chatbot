@@ -1,4 +1,5 @@
 import { requireAdminSecret } from '../_shared/admin-auth.ts';
+import { resolveDefaultBusinessId } from '../_shared/business.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 import { getServiceClient } from '../_shared/db.ts';
 import {
@@ -37,23 +38,26 @@ Deno.serve(async (req: Request) => {
 
   try {
     const supabase = getServiceClient();
+    // Phase 0: this is the one seeded business until the dashboard resolves a business from an
+    // authenticated per-user session (see supabase/functions/_shared/business.ts).
+    const businessId = await resolveDefaultBusinessId(supabase);
 
     if (req.method === 'GET') {
       if (!id) {
-        const documents = await listDocuments(supabase);
+        const documents = await listDocuments(supabase, businessId);
         return json({ documents });
       }
 
-      const document = await findDocumentById(supabase, id);
+      const document = await findDocumentById(supabase, businessId, id);
       if (!document) return json({ error: `No document with id ${id}` }, 404);
 
-      const chunks = await listChunksForDocument(supabase, id);
+      const chunks = await listChunksForDocument(supabase, businessId, id);
       return json({ document, chunks });
     }
 
     // DELETE
     if (!id) return json({ error: 'Expected DELETE /knowledge/{id}' }, 400);
-    await deleteDocument(supabase, id);
+    await deleteDocument(supabase, businessId, id);
     return json({ status: 'deleted', documentId: id });
   } catch (error) {
     console.error('knowledge function error:', error);

@@ -10,9 +10,12 @@ import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 // (website widget): embed the message, retrieve grounded knowledge, gate on
 // having something to ground the reply in, generate a reply, and persist
 // conversation memory. The two callers differ only in how they resolve a
-// Customer (phone vs. session id) before calling this.
+// Customer (phone vs. session id) before calling this — both already resolve businessId
+// themselves (see supabase/functions/_shared/business.ts) and pass it straight through so every
+// downstream query stays scoped to that tenant.
 export async function runRagPipeline(
   supabase: SupabaseClient,
+  businessId: string,
   config: AiConfiguration,
   customer: Customer,
   message: string
@@ -20,6 +23,7 @@ export async function runRagPipeline(
   const queryEmbedding = await embed(message, config.embedding_model, 'search_query');
   const chunks = await searchKnowledge(
     supabase,
+    businessId,
     queryEmbedding,
     config.top_k,
     config.similarity_threshold
@@ -28,13 +32,16 @@ export async function runRagPipeline(
   // Grounding gate: never call the LLM without supporting context. This is
   // what actually prevents hallucination, not prompt instructions.
   if (chunks.length === 0) {
-    const userMessage = await appendMessage(supabase, customer.id, { role: 'user', message });
-    await appendMessage(supabase, customer.id, {
+    const userMessage = await appendMessage(supabase, businessId, customer.id, {
+      role: 'user',
+      message,
+    });
+    await appendMessage(supabase, businessId, customer.id, {
       role: 'assistant',
       message: config.fallback_message,
       confidence: 0,
     });
-    await createEscalationIfNeeded(supabase, customer.id, userMessage.id, message);
+    await createEscalationIfNeeded(supabase, businessId, customer.id, userMessage.id, message);
 
     return {
       reply: config.fallback_message,
@@ -47,8 +54,8 @@ export async function runRagPipeline(
   }
 
   const [summary, recentTurns] = await Promise.all([
-    loadSummary(supabase, customer.id),
-    loadRecentTurns(supabase, customer.id),
+    loadSummary(supabase, businessId, customer.id),
+    loadRecentTurns(supabase, businessId, customer.id),
   ]);
 
   const promptMessages = buildMessages(config, summary, recentTurns, chunks, message);
@@ -76,15 +83,15 @@ export async function runRagPipeline(
   const confidence = chunks[0].similarity;
   const sources = chunks.map((chunk) => `chunk_${chunk.id}`);
 
-  await appendMessage(supabase, customer.id, { role: 'user', message });
-  await appendMessage(supabase, customer.id, {
+  await appendMessage(supabase, businessId, customer.id, { role: 'user', message });
+  await appendMessage(supabase, businessId, customer.id, {
     role: 'assistant',
     message: reply,
     confidence,
     model: modelUsed,
     sourceChunks: sources,
   });
-  await maybeUpdateSummary(supabase, customer.id);
+  await maybeUpdateSummary(supabase, businessId, customer.id);
 
   return {
     reply,

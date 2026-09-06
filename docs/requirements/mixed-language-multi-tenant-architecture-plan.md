@@ -92,20 +92,20 @@ Confirmed by reading `supabase/migrations/*.sql`, `supabase/functions/_shared/*.
 
 ## 3. Gap summary (target vs. actual)
 
-| Area | Target spec | Current repo | Gap |
-| --- | --- | --- | --- |
-| Tenancy | `business_id` on every table, RLS-enforced | Single global tenant, no RLS scoping | **Full rebuild** |
-| WhatsApp channel | Direct Meta Cloud API webhook, `WhatsAppProvider` abstraction | ManyChat relay owns the webhook; repo only exposes generic `/chat` | **New integration** — build direct Meta webhook, keep ManyChat as a supported mode (per-business choice) |
-| AI provider | `AIProvider` interface (`generateResponse`/`generateEmbedding`/`classify`) | Free functions in one file, OpenRouter-only, no `classify` | **Refactor** |
-| Language Engine | Dedicated pre-response stage, output schema, language memory | Nonexistent | **New component** |
-| RAG | Per-business filtered pgvector retrieval | Working, but global (no tenant filter) | **Extend** |
-| Memory | Short + long-term, structured customer facts | Short-term only; summary stubbed | **Extend** |
-| Tools | Registry (`create_lead`, `create_order`, `check_availability`, etc.) | None | **New component** |
-| Human handoff | LLM-driven + explicit conversation status machine | Reactive, zero-chunk-only trigger | **Extend** |
-| Response validation | Language/factuality/tool-claim/length checks pre-send | None | **New component** |
-| Dashboard | + Products, Leads, Orders, per-business AI settings | Knowledge/Settings/Escalations/Widget/Analytics only | **Extend** |
-| Reliability | Idempotent webhook via `provider_message_id` | No idempotency key | **Add** |
-| Observability | `ai_events` table, full trace logging | None | **Add** |
+| Area                | Target spec                                                                | Current repo                                                       | Gap                                                                                                      |
+| ------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| Tenancy             | `business_id` on every table, RLS-enforced                                 | Single global tenant, no RLS scoping                               | **Full rebuild**                                                                                         |
+| WhatsApp channel    | Direct Meta Cloud API webhook, `WhatsAppProvider` abstraction              | ManyChat relay owns the webhook; repo only exposes generic `/chat` | **New integration** — build direct Meta webhook, keep ManyChat as a supported mode (per-business choice) |
+| AI provider         | `AIProvider` interface (`generateResponse`/`generateEmbedding`/`classify`) | Free functions in one file, OpenRouter-only, no `classify`         | **Refactor**                                                                                             |
+| Language Engine     | Dedicated pre-response stage, output schema, language memory               | Nonexistent                                                        | **New component**                                                                                        |
+| RAG                 | Per-business filtered pgvector retrieval                                   | Working, but global (no tenant filter)                             | **Extend**                                                                                               |
+| Memory              | Short + long-term, structured customer facts                               | Short-term only; summary stubbed                                   | **Extend**                                                                                               |
+| Tools               | Registry (`create_lead`, `create_order`, `check_availability`, etc.)       | None                                                               | **New component**                                                                                        |
+| Human handoff       | LLM-driven + explicit conversation status machine                          | Reactive, zero-chunk-only trigger                                  | **Extend**                                                                                               |
+| Response validation | Language/factuality/tool-claim/length checks pre-send                      | None                                                               | **New component**                                                                                        |
+| Dashboard           | + Products, Leads, Orders, per-business AI settings                        | Knowledge/Settings/Escalations/Widget/Analytics only               | **Extend**                                                                                               |
+| Reliability         | Idempotent webhook via `provider_message_id`                               | No idempotency key                                                 | **Add**                                                                                                  |
+| Observability       | `ai_events` table, full trace logging                                      | None                                                               | **Add**                                                                                                  |
 
 ## 4. Key decisions
 
@@ -137,27 +137,58 @@ Confirmed by reading `supabase/migrations/*.sql`, `supabase/functions/_shared/*.
 
 ## 5. Proposed phased plan (re-sequenced for this codebase)
 
-### Phase 0 — Foundation: tenancy schema + hard-cut migration
-- Add `businesses`, `business_users` (roles: owner/admin/agent/viewer), `whatsapp_numbers`
-  (including the new `integration_mode` + per-mode credential columns from §4.1) tables.
-- Seed exactly one `businesses` row: `name = 'MK Agency'`, `slug = 'mk-agency'`.
-- Migrate every existing table (`customers`, `ai_configuration` → becomes `ai_settings` per
-  business, `knowledge_documents`, `knowledge_chunks`, `conversation_messages`,
-  `conversation_summary`, `chat_escalations`, `web_widget_config`) to carry a `business_id` column,
-  backfilled to the `mk-agency` row's id for every existing row. Hard-cut, single migration —
-  no parallel/dual-write period (§4.2).
-- Write RLS policies: every table filtered by `business_id` resolved from the authenticated
-  session (Supabase Auth + `business_users`), never trusted from client input, per spec §17.
-- Update every Edge Function query (`db.ts`, `vector-search.ts`, `knowledge.ts`, `escalations.ts`,
-  `config.ts`) to scope by `business_id`, and update `match_knowledge_chunks` RPC to accept and
-  filter on it (critical: closes the cross-tenant retrieval leak risk called out in spec §11).
-- Add a cross-tenant isolation test as a gate before any later phase builds on this schema: seed a
-  second throwaway business in a test fixture and assert its knowledge/customers/conversations are
-  unreachable from `mk-agency`'s session context.
+### Phase 0 — Foundation: tenancy schema + hard-cut migration — **done, 2026-09-06**
+
+Full change log in
+[whatsapp-supabase-backend.md](./whatsapp-supabase-backend.md)'s Change history. Summary against
+the original scope below:
+
+- Added `businesses`, `business_users` (roles: owner/admin/agent/viewer), `whatsapp_numbers`
+  (including the new `integration_mode` + per-mode credential columns from §4.1) tables. Done as
+  planned.
+- Seeded exactly one `businesses` row: `name = 'MK Agency'`, `slug = 'mk-agency'`. Done.
+- Migrated every existing table (`customers`, `ai_configuration`, `knowledge_documents`,
+  `knowledge_chunks`, `conversation_messages`, `conversation_summary`, `chat_escalations`,
+  `web_widget_config`) to carry a `business_id` column, backfilled to the `mk-agency` row's id for
+  every existing row. Hard-cut, single migration set — no parallel/dual-write period (§4.2).
+  Deviation from the original scope note above: `ai_configuration` was **not** renamed to
+  `ai_settings` — kept the existing name to minimize blast radius on this pass; revisit in a later
+  phase if the rename still seems worth it once ai_settings grows business-specific fields the
+  spec's §18 schema doesn't have yet (language/tone/handoff settings, Phase 7).
+- RLS policies were added on every business-scoped table, but scoped to `business_users`
+  membership via `auth.uid()` as originally planned — **not yet the operative access control**,
+  because nothing in this codebase queries Postgres as an authenticated user yet: every Edge
+  Function uses the service-role client (bypasses RLS), and the dashboard still authenticates
+  mutations via a single global `INGEST_ADMIN_SECRET`, not a per-user session tied to a business.
+  The policies are forward-looking/defense-in-depth for when that changes (dashboard auth is a
+  later phase). The actual, currently-operative isolation mechanism is explicit `business_id`
+  filtering added to every Edge Function query.
+- Updated every Edge Function query (`db.ts`, `vector-search.ts`, `knowledge.ts`,
+  `escalations.ts`, `config.ts`, `widget-config.ts`, `memory.ts`, `rag-pipeline.ts`) to scope by
+  `business_id`, and updated `match_knowledge_chunks` to accept and filter on a new
+  `p_business_id` parameter (closes the cross-tenant retrieval leak risk called out in spec §11).
+  Every entrypoint (`chat`, `web-chat`, `knowledge`, `ingest`, `reindex`, `search`,
+  `widget-config`, `ai-config`, `escalations`) resolves the tenant via a new
+  `_shared/business.ts#resolveDefaultBusinessId()` — an interim resolver that always returns
+  `mk-agency` until Phase 6 gives each channel/dashboard session its own real tenant identity.
+  This is a deliberate scope boundary, not a gap: no caller anywhere yet has its own business
+  identity to resolve from, so building real per-request resolution now would have nothing to
+  branch on.
+- Cross-tenant isolation gate: since there's no live Postgres/RLS integration test harness in this
+  repo (all existing tests mock `SupabaseClient` — no DB is spun up), the "seed two businesses,
+  assert isolation" test originally scoped here was adapted to what's actually testable today:
+  `_shared/business-scoping.test.ts` calls each of a representative set of scoped functions
+  (`findOrCreateCustomer`, `loadActiveConfig`, `findDocumentById`, `createEscalationIfNeeded`)
+  twice with two different business ids and asserts the query/insert actually tracks the argument
+  each time — the regression this guards against (a function silently dropping its `businessId`
+  parameter) is the realistic failure mode given RLS isn't the operative enforcement yet. A true
+  live-Postgres RLS isolation test is still owed once Phase 6/7 introduces authenticated
+  per-business dashboard queries and there's a database to run it against.
 
 ### Phase 1 — Language Engine
+
 - New `_shared/language-engine.ts`: detect `{primary_language, secondary_language, style, script,
-  formality, confidence}` from the latest message + recent turns (LLM classification call, not
+formality, confidence}` from the latest message + recent turns (LLM classification call, not
   naive char-detection — spec explicitly warns Singlish written in Latin script gets misclassified
   as English by character-level detectors).
 - Add `primary_language`/`secondary_language`/`style`/`formality`/`confidence`/`last_detected_at`
@@ -172,6 +203,7 @@ Confirmed by reading `supabase/migrations/*.sql`, `supabase/functions/_shared/*.
   seeded examples before calling this phase done.
 
 ### Phase 2 — Conversation entity + orchestrator shape
+
 - Introduce a proper `conversations` table (currently missing — messages/summary key off
   `customer_id` directly) with `status` (`ai_active`/`human_requested`/`human_active`/`resolved`),
   `assigned_user_id`, language fields from Phase 1. This is a prerequisite for both human handoff
@@ -181,6 +213,7 @@ Confirmed by reading `supabase/migrations/*.sql`, `supabase/functions/_shared/*.
   RAG being the only path.
 
 ### Phase 3 — Tools
+
 - `_shared/tools.ts`: tool registry (`name`, `description`, `input_schema`, `handler`,
   `permission`), starting with `create_lead`, `update_customer`, `request_human`, `notify_team` —
   these map directly onto tables that already exist or are trivial to add (`leads` is new;
@@ -192,12 +225,14 @@ Confirmed by reading `supabase/migrations/*.sql`, `supabase/functions/_shared/*.
   (dashboard work, Phase 6).
 
 ### Phase 4 — Response validation
+
 - `_shared/response-validator.ts`: language-match check (reuse Language Engine's detection against
   the reply), tool-claim check (did the model claim an action completed without a successful tool
   result?), length/WhatsApp-friendliness check. On failure, regenerate once with corrective
   instructions per spec §22, otherwise fall back to the existing verbatim `fallback_message` path.
 
 ### Phase 5 — AI provider abstraction cleanup
+
 - Formalize `_shared/ai-provider.ts`'s free functions into an `AIProvider` interface
   (`generateResponse`/`generateEmbedding`/`classify`) with `OpenRouterProvider` as the sole
   implementation for now — mechanical refactor, low risk, unblocks future provider swaps and gives
@@ -205,6 +240,7 @@ Confirmed by reading `supabase/migrations/*.sql`, `supabase/functions/_shared/*.
   contract instead of ad hoc `chatComplete()` calls.
 
 ### Phase 6 — WhatsApp channel: both ManyChat-per-tenant and direct Meta webhook
+
 - **`WhatsAppProvider` abstraction first**: `receiveMessage`/`sendMessage`/`sendMedia`/
   `sendTemplate`/`markRead`, so both integration modes and any future channel share one interface
   and the orchestrator never branches on "which relay sent this."
@@ -221,6 +257,7 @@ Confirmed by reading `supabase/migrations/*.sql`, `supabase/functions/_shared/*.
   key), rather than assuming one path for everyone.
 
 ### Phase 7 — Dashboard extensions + observability
+
 - Add Products, Leads, Orders pages/CRUD (mirrors existing Knowledge/Escalations page patterns).
 - Add `ai_events` table + logging call at the end of the orchestrator (spec §31), surfaced in the
   existing Analytics page.

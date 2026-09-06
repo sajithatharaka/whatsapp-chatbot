@@ -2,13 +2,17 @@ import { assertEquals } from 'https://deno.land/std@0.224.0/assert/mod.ts';
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 import { documentHasChunks, updateChunkEmbedding } from './knowledge.ts';
 
-// Mocks the single chain ingest's checksum short-circuit relies on:
-// supabase.from('knowledge_chunks').select('id', { count: 'exact', head: true }).eq(...)
+const BUSINESS_ID = 'business-1';
+
+// Mocks the chain documentHasChunks relies on:
+// supabase.from('knowledge_chunks').select('id', { count: 'exact', head: true }).eq('document_id', ...).eq('business_id', ...)
 function fakeClientWithChunkCount(count: number | null, error: Error | null = null) {
   return {
     from: () => ({
       select: () => ({
-        eq: () => Promise.resolve({ count, error }),
+        eq: () => ({
+          eq: () => Promise.resolve({ count, error }),
+        }),
       }),
     }),
   } as unknown as SupabaseClient;
@@ -16,24 +20,24 @@ function fakeClientWithChunkCount(count: number | null, error: Error | null = nu
 
 Deno.test('documentHasChunks returns true when chunks exist', async () => {
   const supabase = fakeClientWithChunkCount(3);
-  assertEquals(await documentHasChunks(supabase, 'doc-1'), true);
+  assertEquals(await documentHasChunks(supabase, BUSINESS_ID, 'doc-1'), true);
 });
 
 Deno.test('documentHasChunks returns false when count is zero', async () => {
   const supabase = fakeClientWithChunkCount(0);
-  assertEquals(await documentHasChunks(supabase, 'doc-1'), false);
+  assertEquals(await documentHasChunks(supabase, BUSINESS_ID, 'doc-1'), false);
 });
 
 Deno.test('documentHasChunks returns false when count is null', async () => {
   const supabase = fakeClientWithChunkCount(null);
-  assertEquals(await documentHasChunks(supabase, 'doc-1'), false);
+  assertEquals(await documentHasChunks(supabase, BUSINESS_ID, 'doc-1'), false);
 });
 
 Deno.test('documentHasChunks throws on query error', async () => {
   const supabase = fakeClientWithChunkCount(null, new Error('boom'));
   let threw = false;
   try {
-    await documentHasChunks(supabase, 'doc-1');
+    await documentHasChunks(supabase, BUSINESS_ID, 'doc-1');
   } catch {
     threw = true;
   }
@@ -51,21 +55,28 @@ Deno.test('updateChunkEmbedding passes a 1024-dim vector through unmodified', as
   const newDimensionEmbedding = Array.from({ length: 1024 }, (_, i) => i / 1024);
   let capturedPatch: unknown;
   let capturedId: unknown;
+  let capturedBusinessId: unknown;
   const supabase = {
     from: () => ({
       update: (patch: unknown) => ({
         eq: (_column: string, id: unknown) => {
           capturedPatch = patch;
           capturedId = id;
-          return Promise.resolve({ error: null });
+          return {
+            eq: (_col2: string, businessId: unknown) => {
+              capturedBusinessId = businessId;
+              return Promise.resolve({ error: null });
+            },
+          };
         },
       }),
     }),
   } as unknown as SupabaseClient;
 
-  await updateChunkEmbedding(supabase, 'chunk-1', newDimensionEmbedding);
+  await updateChunkEmbedding(supabase, BUSINESS_ID, 'chunk-1', newDimensionEmbedding);
 
   assertEquals(capturedId, 'chunk-1');
+  assertEquals(capturedBusinessId, BUSINESS_ID);
   assertEquals((capturedPatch as { embedding: number[] }).embedding, newDimensionEmbedding);
   assertEquals((capturedPatch as { embedding: number[] }).embedding.length, 1024);
 });

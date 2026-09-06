@@ -3,6 +3,8 @@ import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 import { isOriginAllowed, loadActiveWidgetConfig, updateWidgetConfig } from './widget-config.ts';
 import type { WebWidgetConfig } from './types.ts';
 
+const BUSINESS_ID = 'business-1';
+
 const BASE_CONFIG: WebWidgetConfig = {
   id: 'config-1',
   enabled: true,
@@ -13,18 +15,20 @@ const BASE_CONFIG: WebWidgetConfig = {
   allowed_origins: ['https://example.com'],
 };
 
-Deno.test('loadActiveWidgetConfig returns the active row', async () => {
+Deno.test('loadActiveWidgetConfig returns the active row for the given business', async () => {
   const supabase = {
     from: () => ({
       select: () => ({
         eq: () => ({
-          single: () => Promise.resolve({ data: BASE_CONFIG, error: null }),
+          eq: () => ({
+            single: () => Promise.resolve({ data: BASE_CONFIG, error: null }),
+          }),
         }),
       }),
     }),
   } as unknown as SupabaseClient;
 
-  const config = await loadActiveWidgetConfig(supabase);
+  const config = await loadActiveWidgetConfig(supabase, BUSINESS_ID);
   assertEquals(config, BASE_CONFIG);
 });
 
@@ -33,7 +37,9 @@ Deno.test('loadActiveWidgetConfig throws on a query error', async () => {
     from: () => ({
       select: () => ({
         eq: () => ({
-          single: () => Promise.resolve({ data: null, error: new Error('boom') }),
+          eq: () => ({
+            single: () => Promise.resolve({ data: null, error: new Error('boom') }),
+          }),
         }),
       }),
     }),
@@ -41,7 +47,7 @@ Deno.test('loadActiveWidgetConfig throws on a query error', async () => {
 
   let threw = false;
   try {
-    await loadActiveWidgetConfig(supabase);
+    await loadActiveWidgetConfig(supabase, BUSINESS_ID);
   } catch {
     threw = true;
   }
@@ -56,9 +62,11 @@ Deno.test('updateWidgetConfig only patches the fields provided', async () => {
         capturedPatch = patch;
         return {
           eq: () => ({
-            select: () => ({
-              single: () =>
-                Promise.resolve({ data: { ...BASE_CONFIG, enabled: false }, error: null }),
+            eq: () => ({
+              select: () => ({
+                single: () =>
+                  Promise.resolve({ data: { ...BASE_CONFIG, enabled: false }, error: null }),
+              }),
             }),
           }),
         };
@@ -66,7 +74,7 @@ Deno.test('updateWidgetConfig only patches the fields provided', async () => {
     }),
   } as unknown as SupabaseClient;
 
-  const result = await updateWidgetConfig(supabase, { enabled: false });
+  const result = await updateWidgetConfig(supabase, BUSINESS_ID, { enabled: false });
   assertEquals(result.enabled, false);
   assertEquals(capturedPatch.enabled, false);
   assertEquals(capturedPatch.title, undefined);

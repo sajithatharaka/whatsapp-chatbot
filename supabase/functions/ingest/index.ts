@@ -1,5 +1,6 @@
 import { requireAdminSecret } from '../_shared/admin-auth.ts';
 import { embedBatch } from '../_shared/ai-provider.ts';
+import { resolveDefaultBusinessId } from '../_shared/business.ts';
 import { sha256 } from '../_shared/checksum.ts';
 import { chunkText, cleanText } from '../_shared/chunk.ts';
 import { loadActiveConfig } from '../_shared/config.ts';
@@ -56,7 +57,10 @@ Deno.serve(async (req: Request) => {
 
   try {
     const supabase = getServiceClient();
-    const config = await loadActiveConfig(supabase);
+    // Phase 0: this is the one seeded business until the dashboard resolves a business from an
+    // authenticated per-user session (see supabase/functions/_shared/business.ts).
+    const businessId = await resolveDefaultBusinessId(supabase);
+    const config = await loadActiveConfig(supabase, businessId);
 
     const rawText = await extractText({
       sourceType: body.sourceType as never,
@@ -72,14 +76,14 @@ Deno.serve(async (req: Request) => {
 
     let existing = null;
     if (body.documentId) {
-      existing = await findDocumentById(supabase, body.documentId);
+      existing = await findDocumentById(supabase, businessId, body.documentId);
       if (!existing) return json({ error: `No document with id ${body.documentId}` }, 404);
     } else if (body.source) {
-      existing = await findDocumentBySource(supabase, body.source);
+      existing = await findDocumentBySource(supabase, businessId, body.source);
     }
 
     if (existing && existing.checksum === checksum) {
-      const hasChunks = await documentHasChunks(supabase, existing.id);
+      const hasChunks = await documentHasChunks(supabase, businessId, existing.id);
       if (hasChunks) {
         return json({
           documentId: existing.id,
@@ -90,7 +94,7 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    const document = await upsertDocument(supabase, {
+    const document = await upsertDocument(supabase, businessId, {
       id: existing?.id,
       title: body.title ?? existing?.title ?? body.source ?? 'Untitled',
       source: body.source,
@@ -103,6 +107,7 @@ Deno.serve(async (req: Request) => {
     const embeddings = await embedBatch(chunks, config.embedding_model, 'search_document');
     const chunksCreated = await replaceChunks(
       supabase,
+      businessId,
       document.id,
       chunks.map((text, i) => ({ text, embedding: embeddings[i] }))
     );

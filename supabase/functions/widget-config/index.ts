@@ -1,4 +1,5 @@
 import { requireAdminSecret } from '../_shared/admin-auth.ts';
+import { resolveDefaultBusinessId } from '../_shared/business.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 import { getServiceClient } from '../_shared/db.ts';
 import {
@@ -50,9 +51,12 @@ Deno.serve(async (req: Request) => {
 
   try {
     const supabase = getServiceClient();
+    // Phase 0: this is the one seeded business until the dashboard resolves a business from an
+    // authenticated per-user session (see supabase/functions/_shared/business.ts).
+    const businessId = await resolveDefaultBusinessId(supabase);
 
     if (req.method === 'GET') {
-      const config = await loadActiveWidgetConfig(supabase);
+      const config = await loadActiveWidgetConfig(supabase, businessId);
       return json({ config });
     }
 
@@ -67,7 +71,7 @@ Deno.serve(async (req: Request) => {
       return json({ error: 'Invalid update payload' }, 400);
     }
 
-    const config = await updateWidgetConfig(supabase, body);
+    const config = await updateWidgetConfig(supabase, businessId, body);
     return json({ config });
   } catch (error) {
     console.error('widget-config function error:', error);

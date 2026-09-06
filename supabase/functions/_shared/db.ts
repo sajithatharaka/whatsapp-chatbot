@@ -14,14 +14,20 @@ export function getServiceClient(): SupabaseClient {
 
 const CUSTOMER_COLUMNS = 'id, phone, name, preferred_language, channel, session_id';
 
+// business_id scopes every query so a phone/session id can never resolve to another tenant's
+// customer row (see docs/requirements/mixed-language-multi-tenant-architecture-plan.md, Phase 0).
+// customers.phone is now unique per (business_id, phone), not globally, so the same phone number
+// can legitimately message two different businesses' WhatsApp numbers as two separate customers.
 export async function findOrCreateCustomer(
   supabase: SupabaseClient,
+  businessId: string,
   phone: string,
   name?: string
 ): Promise<Customer> {
   const { data: existing, error: findError } = await supabase
     .from('customers')
     .select(CUSTOMER_COLUMNS)
+    .eq('business_id', businessId)
     .eq('phone', phone)
     .maybeSingle();
 
@@ -35,6 +41,7 @@ export async function findOrCreateCustomer(
         .from('customers')
         .update({ name, updated_at: new Date().toISOString() })
         .eq('id', existing.id)
+        .eq('business_id', businessId)
         .select(CUSTOMER_COLUMNS)
         .single();
       if (updateError) throw updateError;
@@ -45,7 +52,7 @@ export async function findOrCreateCustomer(
 
   const { data: created, error: insertError } = await supabase
     .from('customers')
-    .insert({ phone, name: name ?? null, channel: 'whatsapp' })
+    .insert({ business_id: businessId, phone, name: name ?? null, channel: 'whatsapp' })
     .select(CUSTOMER_COLUMNS)
     .single();
 
@@ -60,11 +67,13 @@ export async function findOrCreateCustomer(
 // the same way returning WhatsApp customers do.
 export async function findOrCreateWebCustomer(
   supabase: SupabaseClient,
+  businessId: string,
   sessionId: string
 ): Promise<Customer> {
   const { data: existing, error: findError } = await supabase
     .from('customers')
     .select(CUSTOMER_COLUMNS)
+    .eq('business_id', businessId)
     .eq('channel', 'web')
     .eq('session_id', sessionId)
     .maybeSingle();
@@ -74,7 +83,7 @@ export async function findOrCreateWebCustomer(
 
   const { data: created, error: insertError } = await supabase
     .from('customers')
-    .insert({ channel: 'web', session_id: sessionId })
+    .insert({ business_id: businessId, channel: 'web', session_id: sessionId })
     .select(CUSTOMER_COLUMNS)
     .single();
 

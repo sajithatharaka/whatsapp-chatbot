@@ -3,14 +3,21 @@ import type { ConversationTurn } from './types.ts';
 
 const RECENT_TURNS_LIMIT = 10;
 
+// businessId scopes every query so a customer_id can never be used to read or append to another
+// tenant's conversation history (see
+// docs/requirements/mixed-language-multi-tenant-architecture-plan.md, Phase 0). customer_id
+// alone would already imply the right business via customers.business_id, but the explicit
+// filter here is defense in depth and keeps this table's RLS policy meaningful.
 export async function loadRecentTurns(
   supabase: SupabaseClient,
+  businessId: string,
   customerId: string,
   limit: number = RECENT_TURNS_LIMIT
 ): Promise<ConversationTurn[]> {
   const { data, error } = await supabase
     .from('conversation_messages')
     .select('role, message')
+    .eq('business_id', businessId)
     .eq('customer_id', customerId)
     .order('created_at', { ascending: false })
     .limit(limit);
@@ -21,11 +28,13 @@ export async function loadRecentTurns(
 
 export async function loadSummary(
   supabase: SupabaseClient,
+  businessId: string,
   customerId: string
 ): Promise<string | null> {
   const { data, error } = await supabase
     .from('conversation_summary')
     .select('summary')
+    .eq('business_id', businessId)
     .eq('customer_id', customerId)
     .maybeSingle();
 
@@ -44,12 +53,14 @@ export interface AppendMessageInput {
 
 export async function appendMessage(
   supabase: SupabaseClient,
+  businessId: string,
   customerId: string,
   input: AppendMessageInput
 ): Promise<{ id: string }> {
   const { data, error } = await supabase
     .from('conversation_messages')
     .insert({
+      business_id: businessId,
       customer_id: customerId,
       role: input.role,
       message: input.message,
@@ -70,6 +81,7 @@ export async function appendMessage(
 // has the seam for Phase 2 to fill in.
 export async function maybeUpdateSummary(
   _supabase: SupabaseClient,
+  _businessId: string,
   _customerId: string
 ): Promise<void> {
   return;

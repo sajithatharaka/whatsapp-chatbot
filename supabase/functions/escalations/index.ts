@@ -1,4 +1,5 @@
 import { requireAdminSecret } from '../_shared/admin-auth.ts';
+import { resolveDefaultBusinessId } from '../_shared/business.ts';
 import { loadActiveConfig } from '../_shared/config.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 import { getServiceClient } from '../_shared/db.ts';
@@ -74,22 +75,25 @@ Deno.serve(async (req: Request) => {
 
   try {
     const supabase = getServiceClient();
+    // Phase 0: this is the one seeded business until the dashboard resolves a business from an
+    // authenticated per-user session (see supabase/functions/_shared/business.ts).
+    const businessId = await resolveDefaultBusinessId(supabase);
 
     if (req.method === 'GET') {
       if (!id) {
         const statuses = parseStatuses(url.searchParams.get('status'));
         const from = url.searchParams.get('from') ?? undefined;
         const to = url.searchParams.get('to') ?? undefined;
-        const escalations = await listEscalations(supabase, { statuses, from, to });
+        const escalations = await listEscalations(supabase, businessId, { statuses, from, to });
         return json({ escalations });
       }
 
-      const escalation = await findEscalationById(supabase, id);
+      const escalation = await findEscalationById(supabase, businessId, id);
       if (!escalation) return json({ error: `No escalation with id ${id}` }, 404);
 
-      const messages = await listMessagesForCustomer(supabase, escalation.customer_id);
-      const config = await loadActiveConfig(supabase);
-      const aiSummary = await generateSummary(supabase, config, escalation, messages);
+      const messages = await listMessagesForCustomer(supabase, businessId, escalation.customer_id);
+      const config = await loadActiveConfig(supabase, businessId);
+      const aiSummary = await generateSummary(supabase, businessId, config, escalation, messages);
 
       return json({ escalation: { ...escalation, ai_summary: aiSummary }, messages });
     }
@@ -107,7 +111,7 @@ Deno.serve(async (req: Request) => {
       return json({ error: 'Invalid update payload' }, 400);
     }
 
-    const escalation = await updateEscalation(supabase, id, body);
+    const escalation = await updateEscalation(supabase, businessId, id, body);
     return json({ escalation });
   } catch (error) {
     console.error('escalations function error:', error);

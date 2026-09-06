@@ -1,5 +1,6 @@
 import { requireAdminSecret } from '../_shared/admin-auth.ts';
 import { embedBatch } from '../_shared/ai-provider.ts';
+import { resolveDefaultBusinessId } from '../_shared/business.ts';
 import { loadActiveConfig } from '../_shared/config.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 import { getServiceClient } from '../_shared/db.ts';
@@ -36,8 +37,11 @@ Deno.serve(async (req: Request) => {
 
   try {
     const supabase = getServiceClient();
-    const config = await loadActiveConfig(supabase);
-    const chunks = await listChunksForReindex(supabase, body.documentId);
+    // Phase 0: this is the one seeded business until the dashboard resolves a business from an
+    // authenticated per-user session (see supabase/functions/_shared/business.ts).
+    const businessId = await resolveDefaultBusinessId(supabase);
+    const config = await loadActiveConfig(supabase, businessId);
+    const chunks = await listChunksForReindex(supabase, businessId, body.documentId);
 
     let reindexed = 0;
     for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
@@ -48,7 +52,9 @@ Deno.serve(async (req: Request) => {
         'search_document'
       );
       await Promise.all(
-        batch.map((chunk, idx) => updateChunkEmbedding(supabase, chunk.id, embeddings[idx]))
+        batch.map((chunk, idx) =>
+          updateChunkEmbedding(supabase, businessId, chunk.id, embeddings[idx])
+        )
       );
       reindexed += batch.length;
     }

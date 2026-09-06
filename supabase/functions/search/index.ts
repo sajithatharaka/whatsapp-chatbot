@@ -1,4 +1,5 @@
 import { embed } from '../_shared/ai-provider.ts';
+import { resolveDefaultBusinessId } from '../_shared/business.ts';
 import { loadActiveConfig } from '../_shared/config.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 import { getServiceClient } from '../_shared/db.ts';
@@ -43,12 +44,21 @@ Deno.serve(async (req: Request) => {
 
   try {
     const supabase = getServiceClient();
-    const config = await loadActiveConfig(supabase);
+    // Phase 0: this is the one seeded business until this developer endpoint gains its own
+    // tenant identification (see supabase/functions/_shared/business.ts).
+    const businessId = await resolveDefaultBusinessId(supabase);
+    const config = await loadActiveConfig(supabase, businessId);
     const topK = body.topK ?? config.top_k;
     const similarityThreshold = body.similarityThreshold ?? config.similarity_threshold;
 
     const queryEmbedding = await embed(body.query, config.embedding_model, 'search_query');
-    const results = await searchKnowledge(supabase, queryEmbedding, topK, similarityThreshold);
+    const results = await searchKnowledge(
+      supabase,
+      businessId,
+      queryEmbedding,
+      topK,
+      similarityThreshold
+    );
 
     return json({ query: body.query, topK, similarityThreshold, results });
   } catch (error) {

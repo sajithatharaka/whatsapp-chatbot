@@ -14,13 +14,19 @@ export interface KnowledgeDocumentRecord {
 const DOCUMENT_COLUMNS =
   'id, title, source, source_type, checksum, version, created_at, updated_at';
 
+// Every lookup/mutation below is scoped by business_id (see
+// docs/requirements/mixed-language-multi-tenant-architecture-plan.md, Phase 0) so a document id
+// or source string from one business can never read or mutate another business's knowledge base.
+
 export async function findDocumentBySource(
   supabase: SupabaseClient,
+  businessId: string,
   source: string
 ): Promise<KnowledgeDocumentRecord | null> {
   const { data, error } = await supabase
     .from('knowledge_documents')
     .select(DOCUMENT_COLUMNS)
+    .eq('business_id', businessId)
     .eq('source', source)
     .maybeSingle();
   if (error) throw error;
@@ -29,11 +35,13 @@ export async function findDocumentBySource(
 
 export async function findDocumentById(
   supabase: SupabaseClient,
+  businessId: string,
   id: string
 ): Promise<KnowledgeDocumentRecord | null> {
   const { data, error } = await supabase
     .from('knowledge_documents')
     .select(DOCUMENT_COLUMNS)
+    .eq('business_id', businessId)
     .eq('id', id)
     .maybeSingle();
   if (error) throw error;
@@ -42,11 +50,13 @@ export async function findDocumentById(
 
 export async function listDocuments(
   supabase: SupabaseClient,
+  businessId: string,
   limit = 200
 ): Promise<KnowledgeDocumentRecord[]> {
   const { data, error } = await supabase
     .from('knowledge_documents')
     .select(DOCUMENT_COLUMNS)
+    .eq('business_id', businessId)
     .order('updated_at', { ascending: false })
     .limit(limit);
   if (error) throw error;
@@ -64,6 +74,7 @@ export interface UpsertDocumentInput {
 
 export async function upsertDocument(
   supabase: SupabaseClient,
+  businessId: string,
   input: UpsertDocumentInput
 ): Promise<KnowledgeDocumentRecord> {
   if (input.id) {
@@ -77,6 +88,7 @@ export async function upsertDocument(
         updated_at: new Date().toISOString(),
       })
       .eq('id', input.id)
+      .eq('business_id', businessId)
       .select('id, title, source, source_type, checksum, version')
       .single();
     if (error) throw error;
@@ -86,6 +98,7 @@ export async function upsertDocument(
   const { data, error } = await supabase
     .from('knowledge_documents')
     .insert({
+      business_id: businessId,
       title: input.title,
       source: input.source,
       source_type: input.sourceType,
@@ -112,18 +125,21 @@ export interface ChunkInput {
 // implemented here.
 export async function replaceChunks(
   supabase: SupabaseClient,
+  businessId: string,
   documentId: string,
   chunks: ChunkInput[]
 ): Promise<number> {
   const { error: deleteError } = await supabase
     .from('knowledge_chunks')
     .delete()
-    .eq('document_id', documentId);
+    .eq('document_id', documentId)
+    .eq('business_id', businessId);
   if (deleteError) throw deleteError;
 
   if (chunks.length === 0) return 0;
 
   const rows = chunks.map((chunk, index) => ({
+    business_id: businessId,
     document_id: documentId,
     chunk_text: chunk.text,
     embedding: chunk.embedding,
@@ -142,19 +158,29 @@ export async function replaceChunks(
 // error), leaving a checksum with nothing behind it.
 export async function documentHasChunks(
   supabase: SupabaseClient,
+  businessId: string,
   documentId: string
 ): Promise<boolean> {
   const { count, error } = await supabase
     .from('knowledge_chunks')
     .select('id', { count: 'exact', head: true })
-    .eq('document_id', documentId);
+    .eq('document_id', documentId)
+    .eq('business_id', businessId);
   if (error) throw error;
   return (count ?? 0) > 0;
 }
 
-export async function deleteDocument(supabase: SupabaseClient, id: string): Promise<void> {
+export async function deleteDocument(
+  supabase: SupabaseClient,
+  businessId: string,
+  id: string
+): Promise<void> {
   // knowledge_chunks rows cascade-delete via the document_id FK.
-  const { error } = await supabase.from('knowledge_documents').delete().eq('id', id);
+  const { error } = await supabase
+    .from('knowledge_documents')
+    .delete()
+    .eq('id', id)
+    .eq('business_id', businessId);
   if (error) throw error;
 }
 
@@ -165,9 +191,13 @@ export interface ReindexableChunk {
 
 export async function listChunksForReindex(
   supabase: SupabaseClient,
+  businessId: string,
   documentId?: string
 ): Promise<ReindexableChunk[]> {
-  let query = supabase.from('knowledge_chunks').select('id, chunk_text');
+  let query = supabase
+    .from('knowledge_chunks')
+    .select('id, chunk_text')
+    .eq('business_id', businessId);
   if (documentId) query = query.eq('document_id', documentId);
   const { data, error } = await query;
   if (error) throw error;
@@ -183,12 +213,14 @@ export interface ViewableChunk {
 
 export async function listChunksForDocument(
   supabase: SupabaseClient,
+  businessId: string,
   documentId: string
 ): Promise<ViewableChunk[]> {
   const { data, error } = await supabase
     .from('knowledge_chunks')
     .select('id, chunk_text, metadata, created_at')
     .eq('document_id', documentId)
+    .eq('business_id', businessId)
     .order('created_at', { ascending: true });
   if (error) throw error;
   const chunks = (data ?? []) as ViewableChunk[];
@@ -203,9 +235,14 @@ export async function listChunksForDocument(
 
 export async function updateChunkEmbedding(
   supabase: SupabaseClient,
+  businessId: string,
   id: string,
   embedding: number[]
 ): Promise<void> {
-  const { error } = await supabase.from('knowledge_chunks').update({ embedding }).eq('id', id);
+  const { error } = await supabase
+    .from('knowledge_chunks')
+    .update({ embedding })
+    .eq('id', id)
+    .eq('business_id', businessId);
   if (error) throw error;
 }

@@ -6,10 +6,16 @@ const AI_CONFIG_COLUMNS =
 
 // No caching: Phase 1 traffic doesn't need it, and reading fresh means
 // tuning ai_configuration takes effect immediately with no redeploy.
-export async function loadActiveConfig(supabase: SupabaseClient): Promise<AiConfiguration> {
+// One active row per business (ai_configuration_business_id_active_idx), so businessId is
+// required to know which tenant's configuration to load.
+export async function loadActiveConfig(
+  supabase: SupabaseClient,
+  businessId: string
+): Promise<AiConfiguration> {
   const { data, error } = await supabase
     .from('ai_configuration')
     .select(AI_CONFIG_COLUMNS)
+    .eq('business_id', businessId)
     .eq('is_active', true)
     .single();
 
@@ -32,10 +38,11 @@ export interface UpdateAiConfigInput {
 }
 
 // Mirrors widget-config.ts's updateWidgetConfig: partial patch of the single
-// active row, no caching anywhere so a dashboard edit takes effect on the very
+// active row per business, no caching anywhere so a dashboard edit takes effect on the very
 // next /chat request via loadActiveConfig.
 export async function updateActiveConfig(
   supabase: SupabaseClient,
+  businessId: string,
   input: UpdateAiConfigInput
 ): Promise<AiConfiguration> {
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
@@ -56,6 +63,7 @@ export async function updateActiveConfig(
   const { data, error } = await supabase
     .from('ai_configuration')
     .update(patch)
+    .eq('business_id', businessId)
     .eq('is_active', true)
     .select(AI_CONFIG_COLUMNS)
     .single();

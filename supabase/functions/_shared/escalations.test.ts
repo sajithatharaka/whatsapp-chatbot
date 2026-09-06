@@ -71,6 +71,8 @@ function withEnv(vars: Record<string, string>, fn: () => Promise<void>) {
   });
 }
 
+const BUSINESS_ID = 'business-1';
+
 Deno.test(
   'createEscalationIfNeeded skips insert when an open escalation already exists',
   async () => {
@@ -85,7 +87,13 @@ Deno.test(
       }),
     } as unknown as SupabaseClient;
 
-    await createEscalationIfNeeded(supabase, 'customer-1', 'message-1', 'Where is my order?');
+    await createEscalationIfNeeded(
+      supabase,
+      BUSINESS_ID,
+      'customer-1',
+      'message-1',
+      'Where is my order?'
+    );
     assertEquals(insertCalled, false);
   }
 );
@@ -102,8 +110,15 @@ Deno.test('createEscalationIfNeeded inserts a new row when no open escalation ex
     }),
   } as unknown as SupabaseClient;
 
-  await createEscalationIfNeeded(supabase, 'customer-1', 'message-1', 'Where is my order?');
+  await createEscalationIfNeeded(
+    supabase,
+    BUSINESS_ID,
+    'customer-1',
+    'message-1',
+    'Where is my order?'
+  );
   assertEquals(insertedRow, {
+    business_id: BUSINESS_ID,
     customer_id: 'customer-1',
     trigger_message_id: 'message-1',
     question: 'Where is my order?',
@@ -144,7 +159,7 @@ Deno.test('listEscalations merges the matching customer onto each row', async ()
     },
   } as unknown as SupabaseClient;
 
-  const result = await listEscalations(supabase, { statuses: ['needs_attention'] });
+  const result = await listEscalations(supabase, BUSINESS_ID, { statuses: ['needs_attention'] });
   assertEquals(result.length, 1);
   assertEquals(result[0].customer, {
     id: 'customer-1',
@@ -159,7 +174,7 @@ Deno.test('findEscalationById returns null when no row matches', async () => {
     from: () => queryBuilder({ data: null, error: null }),
   } as unknown as SupabaseClient;
 
-  assertEquals(await findEscalationById(supabase, 'missing'), null);
+  assertEquals(await findEscalationById(supabase, BUSINESS_ID, 'missing'), null);
 });
 
 Deno.test(
@@ -176,7 +191,7 @@ Deno.test(
       }),
     } as unknown as SupabaseClient;
 
-    await updateEscalation(supabase, 'escalation-1', {
+    await updateEscalation(supabase, BUSINESS_ID, 'escalation-1', {
       status: 'responded',
       respondedBy: 'admin@example.com',
     });
@@ -203,7 +218,13 @@ Deno.test('generateSummary returns the cached ai_summary without calling the LLM
   } as ChatEscalationRecord;
 
   try {
-    const summary = await generateSummary(supabase, {} as AiConfiguration, escalation, []);
+    const summary = await generateSummary(
+      supabase,
+      BUSINESS_ID,
+      {} as AiConfiguration,
+      escalation,
+      []
+    );
     assertEquals(summary, 'Already summarized.');
     assertEquals(fetchCalled, false);
   } finally {
@@ -242,6 +263,7 @@ Deno.test(
       try {
         const summary = await generateSummary(
           supabase,
+          BUSINESS_ID,
           { chat_model: 'openai/gpt-5-nano' } as AiConfiguration,
           escalation,
           [

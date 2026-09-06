@@ -33,6 +33,17 @@ Applied in order via `npm run db:push`:
   them. RLS-enabled-with-no-policies only blocks anon/authenticated; `service_role` has `BYPASSRLS`
   but still needs the underlying grant, which nothing had issued until this migration (see Change
   history).
+- `create_business_tenancy_tables` — `businesses`, `business_users` (owner/admin/agent/viewer
+  roles), `whatsapp_numbers` (`integration_mode`: `manychat` | `meta_direct`). Foundation for
+  Phase 0 of the multi-tenancy migration (see Change history and
+  [mixed-language-multi-tenant-architecture-plan.md](./mixed-language-multi-tenant-architecture-plan.md)).
+- `seed_mk_agency_business` — seeds the one business (`slug: mk-agency`) every pre-existing row is
+  backfilled onto.
+- `add_business_id_to_tenant_tables` — adds `business_id` to every table above, backfills it to
+  `mk-agency`, and tightens uniqueness constraints from global to per-business (customer phone/
+  session id, the single active `ai_configuration`/`web_widget_config` row, document source).
+- `scope_match_knowledge_chunks_by_business` — adds a `p_business_id` parameter to
+  `match_knowledge_chunks` so similarity search can never score another tenant's chunks.
 
 ### Edge Functions (`supabase/functions/`)
 
@@ -243,6 +254,37 @@ committed with real values (see `.gitignore`).
   key/knowledge base in the environment this migration was implemented in). Whoever runs that test
   should land a follow-up migration with the calibrated threshold and record the results in
   openrouter-migration.md's own Change history, per that document's Acceptance Criteria.
+- **2026-09-06 — Phase 0 multi-tenancy cutover: every table is now `business_id`-scoped.** Full
+  rationale and phased plan in
+  [mixed-language-multi-tenant-architecture-plan.md](./mixed-language-multi-tenant-architecture-plan.md).
+  Until this migration the whole backend assumed exactly one tenant — no `businesses` table, no
+  `business_id` column anywhere, a single global `customers` table and a single active
+  `ai_configuration`/`web_widget_config` row shared by everyone. Four migrations
+  (`create_business_tenancy_tables`, `seed_mk_agency_business`, `add_business_id_to_tenant_tables`,
+  `scope_match_knowledge_chunks_by_business`) introduce `businesses` / `business_users` /
+  `whatsapp_numbers`, hard-cut every pre-existing row onto one seeded business (`mk-agency`), add
+  `business_id` to `customers`, `ai_configuration`, `knowledge_documents`, `knowledge_chunks`,
+  `conversation_messages`, `conversation_summary`, `chat_escalations`, `web_widget_config`, and
+  tighten uniqueness that used to be global (customer phone/session id, the single active
+  config/widget row, document source) to per-business. `match_knowledge_chunks` gained a leading
+  `p_business_id` parameter — a new function identity, not a signature edit, since it changes
+  overload resolution — so similarity search can never score another tenant's chunks.
+  Every `_shared/*.ts` query function (`db.ts`, `config.ts`, `vector-search.ts`, `knowledge.ts`,
+  `widget-config.ts`, `memory.ts`, `escalations.ts`, `rag-pipeline.ts`) now takes a `businessId`
+  parameter and filters/stamps every query with it; a new `_shared/business.ts` provides
+  `resolveDefaultBusinessId()`, an interim resolver every Edge Function entrypoint (`chat`,
+  `web-chat`, `knowledge`, `ingest`, `reindex`, `search`, `widget-config`, `ai-config`,
+  `escalations`) calls to get the seeded `mk-agency` business id — no caller (ManyChat, the
+  website widget, or the admin-secret-gated dashboard) yet supplies its own tenant identity, so
+  this keeps current behavior unchanged until a later phase wires up real per-request resolution
+  (a per-business ManyChat API key, Meta's `phone_number_id`, or a dashboard session's
+  `business_users` membership — see that plan's Phase 6). RLS policies added on every table are
+  read-only and forward-looking: every Edge Function today uses the service-role client, which
+  bypasses RLS entirely, so the actual isolation mechanism right now is the explicit `business_id`
+  filtering in application code (covered by the new `_shared/business-scoping.test.ts`, which
+  calls a representative function twice with two different business ids and asserts the filter
+  tracks the argument each time) — the policies matter once/if the dashboard queries Postgres
+  directly as an authenticated user.
 
 ## Acceptance Criteria
 

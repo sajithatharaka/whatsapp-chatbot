@@ -1,3 +1,4 @@
+import { resolveDefaultBusinessId } from '../_shared/business.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 import { findOrCreateCustomer, getServiceClient } from '../_shared/db.ts';
 import { loadActiveConfig } from '../_shared/config.ts';
@@ -49,10 +50,20 @@ Deno.serve(async (req: Request) => {
 
   try {
     const supabase = getServiceClient();
-    const config = await loadActiveConfig(supabase);
-    const customer = await findOrCreateCustomer(supabase, phone, name);
+    // Phase 0: this is the one seeded business until Phase 6 wires up real per-request tenant
+    // resolution for the WhatsApp channel (ManyChat per-business key or Meta phone_number_id) —
+    // see supabase/functions/_shared/business.ts.
+    const businessId = await resolveDefaultBusinessId(supabase);
+    const config = await loadActiveConfig(supabase, businessId);
+    const customer = await findOrCreateCustomer(supabase, businessId, phone, name);
 
-    const response: ChatResponse = await runRagPipeline(supabase, config, customer, message);
+    const response: ChatResponse = await runRagPipeline(
+      supabase,
+      businessId,
+      config,
+      customer,
+      message
+    );
     return new Response(JSON.stringify(response), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });

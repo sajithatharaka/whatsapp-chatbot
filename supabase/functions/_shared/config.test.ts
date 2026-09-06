@@ -3,6 +3,8 @@ import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 import { loadActiveConfig, updateActiveConfig } from './config.ts';
 import type { AiConfiguration } from './types.ts';
 
+const BUSINESS_ID = 'business-1';
+
 const BASE_CONFIG: AiConfiguration = {
   id: 'config-1',
   chat_model: 'google/gemini-2.5-flash',
@@ -18,18 +20,20 @@ const BASE_CONFIG: AiConfiguration = {
   timezone: 'UTC',
 };
 
-Deno.test('loadActiveConfig returns the active row', async () => {
+Deno.test('loadActiveConfig returns the active row for the given business', async () => {
   const supabase = {
     from: () => ({
       select: () => ({
         eq: () => ({
-          single: () => Promise.resolve({ data: BASE_CONFIG, error: null }),
+          eq: () => ({
+            single: () => Promise.resolve({ data: BASE_CONFIG, error: null }),
+          }),
         }),
       }),
     }),
   } as unknown as SupabaseClient;
 
-  const config = await loadActiveConfig(supabase);
+  const config = await loadActiveConfig(supabase, BUSINESS_ID);
   assertEquals(config, BASE_CONFIG);
 });
 
@@ -38,7 +42,9 @@ Deno.test('loadActiveConfig throws on a query error', async () => {
     from: () => ({
       select: () => ({
         eq: () => ({
-          single: () => Promise.resolve({ data: null, error: new Error('boom') }),
+          eq: () => ({
+            single: () => Promise.resolve({ data: null, error: new Error('boom') }),
+          }),
         }),
       }),
     }),
@@ -46,7 +52,7 @@ Deno.test('loadActiveConfig throws on a query error', async () => {
 
   let threw = false;
   try {
-    await loadActiveConfig(supabase);
+    await loadActiveConfig(supabase, BUSINESS_ID);
   } catch {
     threw = true;
   }
@@ -61,9 +67,11 @@ Deno.test('updateActiveConfig only patches the fields provided and stamps update
         capturedPatch = patch;
         return {
           eq: () => ({
-            select: () => ({
-              single: () =>
-                Promise.resolve({ data: { ...BASE_CONFIG, temperature: 0.4 }, error: null }),
+            eq: () => ({
+              select: () => ({
+                single: () =>
+                  Promise.resolve({ data: { ...BASE_CONFIG, temperature: 0.4 }, error: null }),
+              }),
             }),
           }),
         };
@@ -71,7 +79,7 @@ Deno.test('updateActiveConfig only patches the fields provided and stamps update
     }),
   } as unknown as SupabaseClient;
 
-  const result = await updateActiveConfig(supabase, { temperature: 0.4 });
+  const result = await updateActiveConfig(supabase, BUSINESS_ID, { temperature: 0.4 });
 
   assertEquals(result.temperature, 0.4);
   assertEquals(capturedPatch.temperature, 0.4);
@@ -89,8 +97,10 @@ Deno.test(
           capturedPatch = patch;
           return {
             eq: () => ({
-              select: () => ({
-                single: () => Promise.resolve({ data: BASE_CONFIG, error: null }),
+              eq: () => ({
+                select: () => ({
+                  single: () => Promise.resolve({ data: BASE_CONFIG, error: null }),
+                }),
               }),
             }),
           };
@@ -98,7 +108,7 @@ Deno.test(
       }),
     } as unknown as SupabaseClient;
 
-    await updateActiveConfig(supabase, {
+    await updateActiveConfig(supabase, BUSINESS_ID, {
       chatModel: 'openai/gpt-4o',
       fallbackModel: null,
       businessRulesPrompt: null,
@@ -121,8 +131,10 @@ Deno.test('updateActiveConfig throws on a query error', async () => {
     from: () => ({
       update: () => ({
         eq: () => ({
-          select: () => ({
-            single: () => Promise.resolve({ data: null, error: new Error('boom') }),
+          eq: () => ({
+            select: () => ({
+              single: () => Promise.resolve({ data: null, error: new Error('boom') }),
+            }),
           }),
         }),
       }),
@@ -131,7 +143,7 @@ Deno.test('updateActiveConfig throws on a query error', async () => {
 
   let threw = false;
   try {
-    await updateActiveConfig(supabase, { temperature: 0.4 });
+    await updateActiveConfig(supabase, BUSINESS_ID, { temperature: 0.4 });
   } catch {
     threw = true;
   }
