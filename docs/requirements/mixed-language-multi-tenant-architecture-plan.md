@@ -95,7 +95,7 @@ Confirmed by reading `supabase/migrations/*.sql`, `supabase/functions/_shared/*.
 | Area | Target spec | Current repo | Gap |
 | --- | --- | --- | --- |
 | Tenancy | `business_id` on every table, RLS-enforced | Single global tenant, no RLS scoping | **Full rebuild** |
-| WhatsApp channel | Direct Meta Cloud API webhook, `WhatsAppProvider` abstraction | ManyChat relay owns the webhook; repo only exposes generic `/chat` | **New integration**, ManyChat becomes optional/legacy |
+| WhatsApp channel | Direct Meta Cloud API webhook, `WhatsAppProvider` abstraction | ManyChat relay owns the webhook; repo only exposes generic `/chat` | **New integration** — build direct Meta webhook, keep ManyChat as a supported mode (per-business choice) |
 | AI provider | `AIProvider` interface (`generateResponse`/`generateEmbedding`/`classify`) | Free functions in one file, OpenRouter-only, no `classify` | **Refactor** |
 | Language Engine | Dedicated pre-response stage, output schema, language memory | Nonexistent | **New component** |
 | RAG | Per-business filtered pgvector retrieval | Working, but global (no tenant filter) | **Extend** |
@@ -107,20 +107,29 @@ Confirmed by reading `supabase/migrations/*.sql`, `supabase/functions/_shared/*.
 | Reliability | Idempotent webhook via `provider_message_id` | No idempotency key | **Add** |
 | Observability | `ai_events` table, full trace logging | None | **Add** |
 
-## 4. Key open decisions (need your call before Phase 1 starts)
+## 4. Key decisions
 
-1. **ManyChat vs. direct Meta webhook.** The spec assumes a direct `/webhooks/whatsapp` Edge
-   Function per §16. Today ManyChat plays that role and is documented/relied on
-   (`manychat-whatsapp-integration.md`). Options: (a) keep ManyChat as the relay per business
-   (simplest, but each tenant needs their own ManyChat account/automation — doesn't scale as a
-   SaaS), or (b) build the direct Meta Cloud API webhook per the spec and retire ManyChat. For a
-   true multi-tenant SaaS where you provision WhatsApp numbers per customer, (b) is what the spec
-   intends and what "SaaS from day one" requires — ManyChat can't dynamically route to N tenants.
-2. **Migration strategy for existing single-tenant data.** Whether to (a) hard-cut to
-   multi-tenant with a single migrated "default business" row, or (b) run both schemas in parallel
-   during transition. Recommend (a) — the app has no external customers depending on the current
-   shape yet (confirm), so a clean cutover with one backfilled `businesses` row is far simpler than
-   a dual-write period.
+1. **Channel strategy: support BOTH ManyChat-per-tenant and a direct Meta Cloud API webhook.**
+   `whatsapp_numbers` gets an `integration_mode` column (`'manychat' | 'meta_direct'`) so each
+   business independently picks how its number is connected — no forced migration off ManyChat for
+   existing/less technical tenants, while giving power tenants (and the product's own long-term
+   direction, per spec §16/§38) a first-party Meta integration with no third party in the loop.
+   Both modes terminate at the same per-tenant `AI Orchestrator` call, so Language Engine / RAG /
+   Tools / validation are written once and are channel-agnostic. Tenant resolution differs by mode
+   (see §5 Phase 6 for the exact mechanism — ManyChat can't supply a trustworthy `business_id`
+   directly, so it authenticates via a per-business API key instead of the client asserting an id):
+   - `meta_direct`: webhook payload carries Meta's `phone_number_id` → looked up in
+     `whatsapp_numbers` → resolves `business_id`. No client-supplied tenant id at all.
+   - `manychat`: each business gets its own per-business secret (`whatsapp_numbers.manychat_api_key`
+     or similar), sent as a header in the ManyChat External Request; the Edge Function maps that
+     key to `business_id` server-side. The client never asserts a raw `business_id` — it asserts a
+     secret that the server resolves, same trust model as the `x-admin-secret` pattern already used
+     for `/ingest`.
+2. **Migration strategy: hard-cut.** All existing single-tenant data (customers, knowledge,
+   config, conversations, escalations, widget config) is backfilled into one seeded business named
+   **`mk-agency`** (`slug: mk-agency`). No dual-schema/parallel-write period — there's one
+   deployment today with no other tenant depending on the pre-migration shape, so a single
+   backfill migration is simpler and lower-risk than maintaining two data shapes at once.
 3. **Scope of Phase 1.** The spec's own §35 phases (Foundation → WhatsApp → AI → Knowledge → Tools
    → Dashboard → Evaluation) assume a greenfield build. Since RAG/knowledge/memory/escalations
    already exist, Phase order should be re-sequenced to layer tenancy underneath what's there
@@ -128,18 +137,23 @@ Confirmed by reading `supabase/migrations/*.sql`, `supabase/functions/_shared/*.
 
 ## 5. Proposed phased plan (re-sequenced for this codebase)
 
-### Phase 0 — Decisions + foundation prep
-- Resolve the 3 open decisions above.
-- Add `businesses`, `business_users` (roles: owner/admin/agent/viewer), `whatsapp_numbers` tables.
+### Phase 0 — Foundation: tenancy schema + hard-cut migration
+- Add `businesses`, `business_users` (roles: owner/admin/agent/viewer), `whatsapp_numbers`
+  (including the new `integration_mode` + per-mode credential columns from §4.1) tables.
+- Seed exactly one `businesses` row: `name = 'MK Agency'`, `slug = 'mk-agency'`.
 - Migrate every existing table (`customers`, `ai_configuration` → becomes `ai_settings` per
   business, `knowledge_documents`, `knowledge_chunks`, `conversation_messages`,
-  `conversation_summary`, `chat_escalations`, `web_widget_config`) to carry `business_id`, backfilled
-  against one seeded "default" business row.
+  `conversation_summary`, `chat_escalations`, `web_widget_config`) to carry a `business_id` column,
+  backfilled to the `mk-agency` row's id for every existing row. Hard-cut, single migration —
+  no parallel/dual-write period (§4.2).
 - Write RLS policies: every table filtered by `business_id` resolved from the authenticated
   session (Supabase Auth + `business_users`), never trusted from client input, per spec §17.
 - Update every Edge Function query (`db.ts`, `vector-search.ts`, `knowledge.ts`, `escalations.ts`,
   `config.ts`) to scope by `business_id`, and update `match_knowledge_chunks` RPC to accept and
   filter on it (critical: closes the cross-tenant retrieval leak risk called out in spec §11).
+- Add a cross-tenant isolation test as a gate before any later phase builds on this schema: seed a
+  second throwaway business in a test fixture and assert its knowledge/customers/conversations are
+  unreachable from `mk-agency`'s session context.
 
 ### Phase 1 — Language Engine
 - New `_shared/language-engine.ts`: detect `{primary_language, secondary_language, style, script,
@@ -190,16 +204,21 @@ Confirmed by reading `supabase/migrations/*.sql`, `supabase/functions/_shared/*.
   Language Engine's classification step (Phase 1) and Tool Engine (Phase 3) a shared `classify()`
   contract instead of ad hoc `chatComplete()` calls.
 
-### Phase 6 — Direct WhatsApp channel (pending Decision 1)
-- If direct Meta Cloud API is chosen: `whatsapp-webhook` Edge Function (verify signature, map
-  `phone_number_id` → `business_id` via `whatsapp_numbers`, store message with
-  `unique(business_id, provider_message_id)` idempotency per spec §29), async processing (§30) so
-  the webhook returns fast, and a `WhatsAppProvider` abstraction so ManyChat/Meta/future channels
-  share one interface (`receiveMessage`/`sendMessage`/`sendMedia`/`sendTemplate`/`markRead`).
-- If ManyChat is kept per-tenant instead: document the multi-tenant ManyChat pattern (one
-  automation per business, each posting `business_id` or a per-business API key so `/chat` can
-  resolve tenant) — much smaller change, but doesn't fully satisfy spec §16/§38's channel-agnostic
-  intent.
+### Phase 6 — WhatsApp channel: both ManyChat-per-tenant and direct Meta webhook
+- **`WhatsAppProvider` abstraction first**: `receiveMessage`/`sendMessage`/`sendMedia`/
+  `sendTemplate`/`markRead`, so both integration modes and any future channel share one interface
+  and the orchestrator never branches on "which relay sent this."
+- **`meta_direct` mode**: new `whatsapp-webhook` Edge Function — verify Meta's webhook signature,
+  map inbound `phone_number_id` → `business_id` via `whatsapp_numbers`, store the message with
+  `unique(business_id, provider_message_id)` idempotency per spec §29, queue/async-process so the
+  webhook returns fast (§30), send replies via Meta's Send API directly.
+- **`manychat` mode**: keep today's generic `/chat` contract working, but make it multi-tenant —
+  add the per-business API key lookup from §4.1 so `/chat` resolves `business_id` from the key
+  instead of assuming the single global tenant it does today. Existing `docs/requirements/manychat-whatsapp-integration.md`
+  needs a follow-up describing the per-business key step once this ships.
+- Dashboard: `whatsapp_numbers` settings page lets a business owner pick `integration_mode` per
+  number and see the mode-appropriate setup instructions (Meta app credentials vs. ManyChat API
+  key), rather than assuming one path for everyone.
 
 ### Phase 7 — Dashboard extensions + observability
 - Add Products, Leads, Orders pages/CRUD (mirrors existing Knowledge/Escalations page patterns).
@@ -219,7 +238,6 @@ before any other phase builds on top of them — this is the spec's own MVP acce
 
 ## 7. Recommended immediate next step
 
-Get a decision on §4.1 (ManyChat vs. direct Meta webhook) and §4.2 (hard-cut vs. parallel
-migration), since those two answers change the shape of Phase 0's migrations and Phase 6 entirely.
-Everything else in this plan can start (Phase 0 tenancy work, Phase 1 Language Engine) without
-waiting on them.
+Decisions in §4 are resolved (both WhatsApp channel modes supported; hard-cut migration into a
+single `mk-agency` business). Phase 0 (tenancy schema + migrations + RLS) is unblocked and is the
+correct starting point — every later phase depends on `business_id` existing and being enforced.
